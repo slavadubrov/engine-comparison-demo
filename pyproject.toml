@@ -1,5 +1,5 @@
 [project]
-name = "engine-wars-demo"
+name = "engine-comparison-demo"
 version = "0.1.0"
 description = "Benchmarking modern data engines on real-world datasets — NYC Taxi & Food-101"
 readme = "README.md"
