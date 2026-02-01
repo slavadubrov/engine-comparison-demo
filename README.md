@@ -106,6 +106,66 @@ uv run python -m engine_comparison.benchmarks.multimodal --images 100
 
 ---
 
+## Docker Compose (Distributed Stack)
+
+Run the distributed pipelines locally using Docker Compose with GPU support.
+
+### Prerequisites
+
+- **Docker** 20.10+ with Compose v2
+- **NVIDIA Docker** (for GPU support) — [Installation Guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+- **~16 GB RAM** recommended for full stack
+
+### Quick Start
+
+```bash
+# 1. Build all images
+docker compose build
+
+# 2. Start the distributed stack
+docker compose up -d
+
+# 3. Check services
+docker compose ps
+```
+
+### Web UIs
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| MinIO Console | http://localhost:9001 | S3 browser (login: `minioadmin` / `minioadmin`) |
+| Spark UI | http://localhost:8080 | Spark master dashboard |
+| Ray Dashboard | http://localhost:8265 | Ray cluster status |
+
+### Running Pipelines
+
+```bash
+# Spark ETL (NYC Taxi)
+./scripts/docker-run-spark.sh --orders s3a://lake/taxi/*.parquet --output s3a://warehouse/report/
+
+# Ray inference (GPU image classification)
+./scripts/docker-run-ray.sh --input s3://bucket/images/ --output s3://bucket/predictions/
+
+# Daft pipeline (document embedding)
+./scripts/docker-run-daft.sh --input s3://lake/pdfs.parquet --output s3://output/embeddings/
+```
+
+### Uploading Test Data
+
+```bash
+# Upload local files to MinIO
+./scripts/upload-data.sh .data/food101 bucket/images/
+```
+
+### Stopping
+
+```bash
+docker compose down          # Stop services
+docker compose down -v       # Stop and remove volumes (clears MinIO data)
+```
+
+---
+
 ## Distributed Scripts (Cluster Required)
 
 The `src/engine_comparison/distributed/` directory contains reference
@@ -186,6 +246,13 @@ Saves `multimodal_results.png` — a comparison chart.
 ```
 engine-comparison-demo/
 ├── pyproject.toml                      # uv/pip project config
+├── Dockerfile                          # GPU-enabled Python container
+├── docker-compose.yml                  # Spark, Ray, MinIO stack
+├── scripts/
+│   ├── docker-run-spark.sh             # Run Spark ETL
+│   ├── docker-run-ray.sh               # Run Ray inference
+│   ├── docker-run-daft.sh              # Run Daft pipeline
+│   └── upload-data.sh                  # Upload to MinIO
 ├── src/engine_comparison/              # Main package
 │   ├── __init__.py
 │   ├── constants.py                    # Centralized configuration
