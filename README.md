@@ -16,13 +16,13 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 
 # 3. Pre-download datasets (optional — benchmarks auto-download on first run)
-uv run python data_loader.py
+uv run python -m engine_comparison.data.loader
 
 # 4. Run the tabular benchmark (~2.9M NYC taxi trips)
-uv run python bench_tabular.py
+uv run python -m engine_comparison.benchmarks.tabular
 
-# 5. Run the multimodal benchmark (500 real food photos)
-uv run python bench_multimodal.py
+# 5. Run the multimodal benchmark (5000 real food photos)
+uv run python -m engine_comparison.benchmarks.multimodal
 ```
 
 First run downloads ~50 MB of data. Subsequent runs use the cache in `.data/`.
@@ -50,7 +50,7 @@ borough and zone names (e.g., "Manhattan — Upper East Side North").
 |---|---|
 | Source | [ETH Zurich via Hugging Face](https://huggingface.co/datasets/ethz/food101) |
 | Format | JPEG images |
-| Default | 500 images (configurable) |
+| Default | 5000 images (configurable) |
 | Content | Real food photos — pizza, sushi, steak, etc. |
 
 Real photographs of food in 101 categories. Variable sizes and aspect ratios,
@@ -92,30 +92,30 @@ Engines: **Pandas + Pillow** (sequential) vs. **Daft** (parallel Rust)
 
 ```bash
 # Tabular: change data month
-uv run python bench_tabular.py --year 2023 --month 6
+uv run python -m engine_comparison.benchmarks.tabular --year 2023 --month 6
 
 # Tabular: more timing precision
-uv run python bench_tabular.py --runs 5
+uv run python -m engine_comparison.benchmarks.tabular --runs 5
 
 # Multimodal: more images = larger speedup (more parallelism)
-uv run python bench_multimodal.py --images 1000
+uv run python -m engine_comparison.benchmarks.multimodal --images 1000
 
 # Multimodal: quick smoke test
-uv run python bench_multimodal.py --images 100
+uv run python -m engine_comparison.benchmarks.multimodal --images 100
 ```
 
 ---
 
 ## Distributed Scripts (Cluster Required)
 
-The `distributed/` directory contains reference implementations for
-cluster-scale processing:
+The `src/engine_comparison/distributed/` directory contains reference
+implementations for cluster-scale processing:
 
-| File | Engine | Workload |
+| Module | Engine | Workload |
 |---|---|---|
-| `ray_inference.py` | Ray Data | GPU batch image classification |
-| `daft_pipeline.py` | Daft Flotilla | Distributed document embedding |
-| `spark_etl.py` | PySpark | Petabyte-scale tabular ETL |
+| `ray_inference` | Ray Data | GPU batch image classification |
+| `daft_pipeline` | Daft Flotilla | Distributed document embedding |
+| `spark_etl` | PySpark | Petabyte-scale tabular ETL |
 
 Install extras: `uv sync --extra distributed`
 
@@ -132,24 +132,42 @@ These require actual cluster infrastructure (Ray, Spark, or Daft Cloud).
 ┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┓
 ┃ Operation        ┃           Pandas ┃           Polars ┃       DataFusion ┃             Daft ┃
 ┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━┩
-│ Read Parquet     │           1.82s  │   0.19s    10×   │   0.15s    12×   │   0.22s     8×   │
-│ Filter           │           0.41s  │   0.04s    10×   │   0.03s    14×   │   0.05s     8×   │
-│ GroupBy + Agg    │           0.95s  │   0.08s    12×   │   0.07s    14×   │   0.10s    10×   │
-│ Join             │           2.10s  │   0.25s     8×   │   0.20s    11×   │   0.30s     7×   │
-│ ETL Pipeline     │           3.50s  │   0.30s    12×   │   0.25s    14×   │   0.35s    10×   │
+│ Read Parquet     │           0.062s │      0.062s 1.0× │      0.073s 0.8× │      0.067s 0.9× │
 ├──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┤
-│ Total            │           8.78s  │   0.86s    10×   │   0.70s    13×   │   1.02s     9×   │
+│ Filter           │           0.016s │      0.024s 0.7× │      0.059s 0.3× │      0.083s 0.2× │
+├──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┤
+│ GroupBy + Agg    │           0.068s │      0.019s 3.7× │      0.023s 3.0× │      0.023s 3.0× │
+├──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┤
+│ Join             │           0.121s │      0.098s 1.2× │      0.164s 0.7× │      0.141s 0.9× │
+├──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┤
+│ ETL Pipeline     │           0.153s │      0.039s 4.0× │      0.038s 4.0× │      0.070s 2.2× │
+├──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┤
+│ Total            │            0.42s │       0.24s 1.7× │       0.36s 1.2× │       0.38s 1.1× │
 └──────────────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────┘
 ```
 
-*(Numbers are illustrative — your results will vary by hardware.)*
+*(Results from a 10-core Mac — your numbers will vary by hardware.)*
 
-Saves `benchmark_results.png` — a grouped bar chart for presentations.
+![Tabular Benchmark Results](benchmarks/benchmark_results.png)
 
 ### Multimodal benchmark
 
-Prints a comparison table with wall-clock times and speedup ratios,
-plus saves `multimodal_results.png`.
+```
+🖼  Engine Wars — Food-101 Multimodal Benchmark
+┏━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ Operation          ┃    Pandas + Pillow ┃        Daft (Rust) ┃    Speedup ┃
+┡━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
+│ Load Images        │             3.840s │             3.863s │       1.0× │
+├────────────────────┼────────────────────┼────────────────────┼────────────┤
+│ Resize 224×224     │             5.775s │             3.321s │       1.7× │
+├────────────────────┼────────────────────┼────────────────────┼────────────┤
+│ Total Pipeline     │            10.980s │             3.832s │       2.9× │
+└────────────────────┴────────────────────┴────────────────────┴────────────┘
+```
+
+![Multimodal Benchmark Results](benchmarks/multimodal_results.png)
+
+Saves `multimodal_results.png` — a comparison chart.
 
 ---
 
@@ -166,21 +184,27 @@ plus saves `multimodal_results.png`.
 ## Project Structure
 
 ```
-engine-wars-demo/
-├── pyproject.toml          # uv/pip project config
-├── data_loader.py          # Downloads + caches real datasets
-├── bench_tabular.py        # NYC Taxi: Pandas vs Polars vs DataFusion vs Daft
-├── bench_multimodal.py     # Food-101: Pandas+Pillow vs Daft (Rust)
-├── distributed/
-│   ├── ray_inference.py    # Ray Data GPU inference (reference)
-│   ├── daft_pipeline.py    # Daft distributed embedding (reference)
-│   └── spark_etl.py        # PySpark ETL (reference)
-└── .data/                  # Auto-created cache (gitignored)
+engine-comparison-demo/
+├── pyproject.toml                      # uv/pip project config
+├── src/engine_comparison/              # Main package
+│   ├── __init__.py
+│   ├── constants.py                    # Centralized configuration
+│   ├── data/
+│   │   ├── __init__.py
+│   │   └── loader.py                   # Downloads + caches datasets
+│   ├── benchmarks/
+│   │   ├── __init__.py
+│   │   ├── tabular.py                  # NYC Taxi benchmark
+│   │   └── multimodal.py               # Food-101 benchmark
+│   └── distributed/
+│       ├── __init__.py
+│       ├── ray_inference.py            # Ray Data GPU inference
+│       ├── daft_pipeline.py            # Daft distributed embedding
+│       └── spark_etl.py                # PySpark ETL
+└── .data/                              # Auto-created cache (gitignored)
     ├── nyc_taxi/
     │   ├── yellow_tripdata_2024-01.parquet
     │   └── taxi_zone_lookup.csv
     └── food101/
-        ├── food_00000.jpg
-        ├── food_00001.jpg
-        └── ...
+        └── food_00000.jpg ... food_04999.jpg
 ```

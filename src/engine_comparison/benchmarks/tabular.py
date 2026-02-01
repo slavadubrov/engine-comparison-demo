@@ -15,9 +15,9 @@ Queries:
   5. ETL Pipeline      — filter → join → aggregate by borough → rank by revenue
 
 Usage:
-    uv run python bench_tabular.py                    # defaults (Jan 2024)
-    uv run python bench_tabular.py --year 2023 --month 6
-    uv run python bench_tabular.py --runs 5           # more timing precision
+    uv run python -m engine_comparison.benchmarks.tabular
+    uv run python -m engine_comparison.benchmarks.tabular --year 2023 --month 6
+    uv run python -m engine_comparison.benchmarks.tabular --runs 5
 """
 
 from __future__ import annotations
@@ -28,15 +28,32 @@ import os
 import time
 from pathlib import Path
 
+import daft
+import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import polars as pl
 import pyarrow.parquet as pq
+from daft import col
+from datafusion import SessionContext
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from data_loader import load_nyc_taxi
+from engine_comparison.constants import (
+    BENCHMARKS_OUTPUT_DIR,
+    DEFAULT_BENCHMARK_RUNS,
+    DEFAULT_TAXI_MONTH,
+    DEFAULT_TAXI_YEAR,
+    TABULAR_CHART_OUTPUT,
+)
+from engine_comparison.data.loader import load_nyc_taxi
 
 console = Console()
+
+# Use non-interactive backend for chart generation
+matplotlib.use("Agg")
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +61,7 @@ console = Console()
 # ---------------------------------------------------------------------------
 
 
-def timeit(fn, n_runs: int = 3) -> float:
+def timeit(fn, n_runs: int = DEFAULT_BENCHMARK_RUNS) -> float:
     """Run fn() n_runs times, return median elapsed seconds."""
     times: list[float] = []
     for _ in range(n_runs):
@@ -62,8 +79,6 @@ def timeit(fn, n_runs: int = 3) -> float:
 
 
 def bench_pandas(trips_path: str, zones_path: str, n_runs: int) -> dict:
-    import pandas as pd
-
     results = {}
 
     # Read
@@ -98,26 +113,6 @@ def bench_pandas(trips_path: str, zones_path: str, n_runs: int) -> dict:
     )
 
     # ETL Pipeline: filter → join → groupby borough → sort
-    def etl_pipeline():
-        (
-            df[df["fare_amount"] > 10.0]
-            .merge(zones, left_on="PULocationID", right_on="LocationID", how="inner")
-            .groupby(["Borough", "Zone"])
-            .agg(
-                revenue=("total_amount", "sum"),
-                trips=("VendorID", "count"),
-                avg_tip_pct=(
-                    "tip_amount",
-                    lambda x: (
-                        x / df.loc[x.index, "fare_amount"].replace(0, np.nan)
-                    ).mean(),
-                ),
-            )
-            .sort_values("revenue", ascending=False)
-            .head(20)
-        )
-
-    # Simpler pipeline that avoids lambda issues
     def etl_pipeline_safe():
         merged = df[df["fare_amount"] > 10.0].merge(
             zones, left_on="PULocationID", right_on="LocationID", how="inner"
@@ -144,8 +139,6 @@ def bench_pandas(trips_path: str, zones_path: str, n_runs: int) -> dict:
 
 
 def bench_polars(trips_path: str, zones_path: str, n_runs: int) -> dict:
-    import polars as pl
-
     results = {}
 
     # Read
@@ -225,8 +218,6 @@ def bench_polars(trips_path: str, zones_path: str, n_runs: int) -> dict:
 
 
 def bench_datafusion(trips_path: str, zones_path: str, n_runs: int) -> dict:
-    from datafusion import SessionContext
-
     results = {}
 
     # Read
@@ -307,9 +298,6 @@ def bench_datafusion(trips_path: str, zones_path: str, n_runs: int) -> dict:
 
 
 def bench_daft(trips_path: str, zones_path: str, n_runs: int) -> dict:
-    import daft
-    from daft import col
-
     results = {}
 
     # Read
@@ -452,14 +440,9 @@ def render_table(all_results: dict[str, dict]) -> None:
 
 
 def save_chart(
-    all_results: dict[str, dict], output_path: str = "benchmark_results.png"
+    all_results: dict[str, dict], output_path: str = TABULAR_CHART_OUTPUT
 ) -> None:
     """Generate a grouped bar chart."""
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
     fig, ax = plt.subplots(figsize=(14, 7))
 
     x = np.arange(len(OPERATIONS))
@@ -505,6 +488,7 @@ def save_chart(
     ax.set_axisbelow(True)
 
     fig.tight_layout()
+    BENCHMARKS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     console.print(f"\n[bold green]Chart saved → {output_path}[/]\n")
     plt.close(fig)
@@ -520,13 +504,22 @@ def main():
         description="Engine Wars — NYC Taxi Tabular Benchmark"
     )
     parser.add_argument(
-        "--year", type=int, default=2024, help="Taxi data year (default: 2024)"
+        "--year",
+        type=int,
+        default=DEFAULT_TAXI_YEAR,
+        help=f"Taxi data year (default: {DEFAULT_TAXI_YEAR})",
     )
     parser.add_argument(
-        "--month", type=int, default=1, help="Taxi data month (default: 1)"
+        "--month",
+        type=int,
+        default=DEFAULT_TAXI_MONTH,
+        help=f"Taxi data month (default: {DEFAULT_TAXI_MONTH})",
     )
     parser.add_argument(
-        "--runs", type=int, default=3, help="Timing runs per operation (default: 3)"
+        "--runs",
+        type=int,
+        default=DEFAULT_BENCHMARK_RUNS,
+        help=f"Timing runs per operation (default: {DEFAULT_BENCHMARK_RUNS})",
     )
     args = parser.parse_args()
 

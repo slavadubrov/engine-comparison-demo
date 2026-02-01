@@ -18,9 +18,9 @@ image operations. Image work would still go through sequential Python
 (map_elements / UDFs), performing similarly to Pandas.
 
 Usage:
-    uv run python bench_multimodal.py                    # 500 images
-    uv run python bench_multimodal.py --images 1000
-    uv run python bench_multimodal.py --images 200       # quick test
+    uv run python -m engine_comparison.benchmarks.multimodal
+    uv run python -m engine_comparison.benchmarks.multimodal --images 1000
+    uv run python -m engine_comparison.benchmarks.multimodal --images 200
 """
 
 from __future__ import annotations
@@ -31,17 +31,29 @@ import os
 import time
 from pathlib import Path
 
+import daft
+import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+from daft import col
 from PIL import Image
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from data_loader import load_food101_images
+from engine_comparison.constants import (
+    BENCHMARKS_OUTPUT_DIR,
+    DEFAULT_N_IMAGES,
+    MULTIMODAL_CHART_OUTPUT,
+    TARGET_IMAGE_SIZE,
+)
+from engine_comparison.data.loader import load_food101_images
 
 console = Console()
 
-TARGET_SIZE = (224, 224)  # Standard vision model input (ResNet, ViT, etc.)
+# Use non-interactive backend for chart generation
+matplotlib.use("Agg")
 
 
 # ---------------------------------------------------------------------------
@@ -59,8 +71,6 @@ def bench_pandas_pillow(image_dir: Path, n_images: int) -> dict:
 
     Every step is single-threaded. On a 16-core machine, 15 cores sit idle.
     """
-    import pandas as pd
-
     results: dict[str, float] = {}
 
     image_paths = sorted(image_dir.glob("*.jpg"))[:n_images]
@@ -80,7 +90,7 @@ def bench_pandas_pillow(image_dir: Path, n_images: int) -> dict:
     t0 = time.perf_counter()
 
     df["resized"] = df["image"].apply(
-        lambda img: img.resize(TARGET_SIZE, Image.LANCZOS)
+        lambda img: img.resize(TARGET_IMAGE_SIZE, Image.LANCZOS)
     )
 
     results["Resize 224×224"] = time.perf_counter() - t0
@@ -117,9 +127,6 @@ def bench_daft_native(image_dir: Path, n_images: int) -> dict:
     All heavy work runs in the Rust engine, completely bypassing Python's
     GIL. On a 16-core machine, all 16 cores participate.
     """
-    import daft
-    from daft import col
-
     results: dict[str, float] = {}
     glob_pattern = str(image_dir / "*.jpg")
 
@@ -144,7 +151,9 @@ def bench_daft_native(image_dir: Path, n_images: int) -> dict:
         daft.from_glob_path(glob_pattern)
         .limit(n_images)
         .with_column("image", col("path").download().decode_image())
-        .with_column("resized", col("image").resize(TARGET_SIZE[0], TARGET_SIZE[1]))
+        .with_column(
+            "resized", col("image").resize(TARGET_IMAGE_SIZE[0], TARGET_IMAGE_SIZE[1])
+        )
     )
     df_resized.collect()
 
@@ -158,7 +167,9 @@ def bench_daft_native(image_dir: Path, n_images: int) -> dict:
         daft.from_glob_path(glob_pattern)
         .limit(n_images)
         .with_column("image", col("path").download().decode_image())
-        .with_column("resized", col("image").resize(TARGET_SIZE[0], TARGET_SIZE[1]))
+        .with_column(
+            "resized", col("image").resize(TARGET_IMAGE_SIZE[0], TARGET_IMAGE_SIZE[1])
+        )
     )
     result = df_full.collect()
 
@@ -215,13 +226,8 @@ def render_results(pandas_results: dict, daft_results: dict) -> None:
 def save_chart(
     pandas_results: dict,
     daft_results: dict,
-    output_path: str = "multimodal_results.png",
+    output_path: str = MULTIMODAL_CHART_OUTPUT,
 ) -> None:
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
     operations = ["Load Images", "Resize 224×224", "Total Pipeline"]
     p_times = [pandas_results.get(op, 0) for op in operations]
     d_times = [daft_results.get(op, 0) for op in operations]
@@ -274,6 +280,7 @@ def save_chart(
     ax.set_axisbelow(True)
 
     fig.tight_layout()
+    BENCHMARKS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     console.print(f"[bold green]Chart saved → {output_path}[/]\n")
     plt.close(fig)
@@ -291,8 +298,8 @@ def main():
     parser.add_argument(
         "--images",
         type=int,
-        default=5000,
-        help="Number of Food-101 images to benchmark (default: 5000)",
+        default=DEFAULT_N_IMAGES,
+        help=f"Number of Food-101 images to benchmark (default: {DEFAULT_N_IMAGES})",
     )
     args = parser.parse_args()
 
@@ -314,7 +321,7 @@ def main():
             f"  Dataset:   Food-101 (ETH Zurich / Hugging Face)\n"
             f"  Images:    [cyan]{n}[/] real food photos\n"
             f"  Samples:   {', '.join(sample_sizes[:3])} ...\n"
-            f"  Target:    [cyan]{TARGET_SIZE[0]}×{TARGET_SIZE[1]}[/] px\n"
+            f"  Target:    [cyan]{TARGET_IMAGE_SIZE[0]}×{TARGET_IMAGE_SIZE[1]}[/] px\n"
             f"  Engines:   Pandas + Pillow  vs.  Daft (Rust native)\n"
             f"  CPU cores: [cyan]{os.cpu_count()}[/]",
             title="🖼  Benchmark Configuration",

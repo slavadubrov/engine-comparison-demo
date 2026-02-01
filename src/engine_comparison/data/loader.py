@@ -18,18 +18,25 @@ All data is cached in .data/ so subsequent runs are instant.
 
 Usage:
   # Pre-download everything (recommended before a live demo):
-  uv run python data_loader.py
+  uv run python -m engine_comparison.data.loader
 
   # Or just run a benchmark script — it auto-downloads on first run.
 """
 
 from __future__ import annotations
 
+import csv
+import gc
 import os
-import sys
 import urllib.request
 from pathlib import Path
 
+# Disable HF Hub's telemetry to prevent background threads
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
+import pyarrow.parquet as pq
+from datasets import load_dataset
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -40,19 +47,21 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
+from engine_comparison.constants import (
+    DATA_DIR,
+    DEFAULT_N_IMAGES,
+    DEFAULT_TAXI_MONTH,
+    DEFAULT_TAXI_YEAR,
+    TAXI_TRIPS_URL,
+    TAXI_ZONES_URL,
+)
+
 console = Console()
 
-DATA_DIR = Path(".data")
 
 # ---------------------------------------------------------------------------
 # NYC Taxi data
 # ---------------------------------------------------------------------------
-
-TAXI_TRIPS_URL = (
-    "https://d37ci6vzurychx.cloudfront.net/trip-data/"
-    "yellow_tripdata_{year}-{month:02d}.parquet"
-)
-TAXI_ZONES_URL = "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv"
 
 
 def _download(url: str, dest: Path, label: str = "Downloading") -> None:
@@ -80,7 +89,9 @@ def _download(url: str, dest: Path, label: str = "Downloading") -> None:
                     progress.advance(task, len(chunk))
 
 
-def load_nyc_taxi(year: int = 2024, month: int = 1) -> tuple[Path, Path]:
+def load_nyc_taxi(
+    year: int = DEFAULT_TAXI_YEAR, month: int = DEFAULT_TAXI_MONTH
+) -> tuple[Path, Path]:
     """
     Download NYC Yellow Taxi trip data (Parquet) and zone lookup (CSV).
 
@@ -119,7 +130,7 @@ def load_nyc_taxi(year: int = 2024, month: int = 1) -> tuple[Path, Path]:
 # ---------------------------------------------------------------------------
 
 
-def load_food101_images(n_images: int = 5000) -> Path:
+def load_food101_images(n_images: int = DEFAULT_N_IMAGES) -> Path:
     """
     Download real food photos from the Food-101 dataset (ETH Zurich).
 
@@ -139,8 +150,6 @@ def load_food101_images(n_images: int = 5000) -> Path:
     console.print(
         f"\n[bold cyan]Downloading {n_images} Food-101 images from Hugging Face...[/]"
     )
-
-    from datasets import load_dataset
 
     # Stream mode: downloads only what we need, no full dataset required
     ds = load_dataset(
@@ -169,6 +178,10 @@ def load_food101_images(n_images: int = 5000) -> Path:
                 img.save(path, "JPEG", quality=90)
             progress.advance(task)
 
+    # Clean up HF Hub connections to prevent hanging
+    del ds
+    gc.collect()
+
     saved = list(images_dir.glob("*.jpg"))
     total_mb = sum(p.stat().st_size for p in saved) / (1024 * 1024)
     console.print(f"  → {len(saved)} images saved ({total_mb:.1f} MB total)\n")
@@ -187,26 +200,22 @@ def main():
     trips_path, zones_path = load_nyc_taxi()
 
     # Show row count
-    import pyarrow.parquet as pq
-
     meta = pq.read_metadata(str(trips_path))
     console.print(
         f"  → Taxi trips: [green]{meta.num_rows:,}[/] rows × {meta.num_columns} cols"
     )
 
-    import csv
-
     with open(zones_path) as f:
         n_zones = sum(1 for _ in csv.reader(f)) - 1
     console.print(f"  → Taxi zones: [green]{n_zones}[/] rows\n")
 
-    images_dir = load_food101_images(n_images=5000)
+    images_dir = load_food101_images(n_images=DEFAULT_N_IMAGES)
     n_images = len(list(images_dir.glob("*.jpg")))
     console.print(f"  → Food-101:   [green]{n_images}[/] images\n")
 
     console.print("[bold green]✓ All data ready! Run the benchmarks:[/]")
-    console.print("  uv run python bench_tabular.py")
-    console.print("  uv run python bench_multimodal.py\n")
+    console.print("  uv run python -m engine_comparison.benchmarks.tabular")
+    console.print("  uv run python -m engine_comparison.benchmarks.multimodal\n")
 
 
 if __name__ == "__main__":
