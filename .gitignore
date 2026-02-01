@@ -1,0 +1,15 @@
+# Cached datasets
+.data/
+
+# Benchmark outputs
+benchmark_results.png
+multimodal_results.png
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# uv
+.python-version
+uv.lock

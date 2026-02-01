@@ -1,0 +1,32 @@
+[project]
+name = "engine-wars-demo"
+version = "0.1.0"
+description = "Benchmarking modern data engines on real-world datasets — NYC Taxi & Food-101"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "daft>=0.7.2",
+    "datafusion>=51.0.0",
+    "datasets>=4.5.0",
+    "matplotlib>=3.10.8",
+    "numpy>=2.2.6",
+    "pandas>=2.3.3",
+    "pillow>=12.1.0",
+    "polars>=1.37.1",
+    "pyarrow>=22.0.0",
+    "rich>=14.3.2",
+]
+
+[project.optional-dependencies]
+distributed = [
+    "pyspark>=4.1.1",
+    "ray[data]>=2.53.0",
+    "torch>=2.10.0",
+    "torchvision>=0.25.0",
+]
+notebook = [
+    "jupyterlab>=4.5.3",
+]
+
+[dependency-groups]
+dev = []
