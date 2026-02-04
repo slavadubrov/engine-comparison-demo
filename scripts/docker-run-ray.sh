@@ -4,8 +4,9 @@
 
 set -e
 
-docker compose exec app bash -c "
-    cd /app && \
-    RAY_ADDRESS=ray://ray-head:10001 \
-    python src/engine_comparison/distributed/ray_inference.py $@
-"
+docker compose exec -e RAY_ADDRESS=auto \
+    -e AWS_ENDPOINT_URL=http://minio:9000 \
+    -e AWS_ACCESS_KEY_ID=minioadmin \
+    -e AWS_SECRET_ACCESS_KEY=minioadmin \
+    ray-head python /app/src/engine_comparison/distributed/ray_inference.py "$@"
+

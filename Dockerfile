@@ -27,6 +27,14 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
+# Install Apache Spark 4.1.1 (matches pyspark 4.1.1 in uv.lock)
+ENV SPARK_VERSION=4.1.1
+ENV SPARK_HOME=/opt/spark
+RUN curl -fsSL https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz \
+    | tar -xz -C /opt \
+    && mv /opt/spark-${SPARK_VERSION}-bin-hadoop3 /opt/spark
+ENV PATH="${SPARK_HOME}/bin:${SPARK_HOME}/sbin:${PATH}"
+
 # Install uv for fast package management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -39,8 +47,9 @@ COPY src/ ./src/
 # Install dependencies (including distributed extras)
 RUN uv sync --frozen --extra distributed
 
-# PyMuPDF for PDF parsing (Daft pipeline)
-RUN uv pip install pymupdf sentence-transformers
+# Make venv Python the default (must be AFTER uv sync creates it)
+ENV PATH="/app/.venv/bin:${PATH}"
+ENV PYTHONPATH="/app/src:${PYTHONPATH}"
 
 # Configure AWS S3 endpoint for MinIO
 ENV AWS_ENDPOINT_URL=http://minio:9000

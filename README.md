@@ -139,9 +139,15 @@ docker compose ps
 
 ### Running Pipelines
 
+First, upload the sample datasets to MinIO, then run the pipelines:
+
 ```bash
+# Step 1: Upload datasets to MinIO (required before running pipelines)
+./scripts/upload-data.sh
+
+# Step 2: Run pipelines
 # Spark ETL (NYC Taxi)
-./scripts/docker-run-spark.sh --orders s3a://lake/taxi/*.parquet --output s3a://warehouse/report/
+./scripts/docker-run-spark.sh --orders "s3a://lake/taxi/*.parquet" --output s3a://warehouse/report
 
 # Ray inference (GPU image classification)
 ./scripts/docker-run-ray.sh --input s3://bucket/images/ --output s3://bucket/predictions/
@@ -150,12 +156,8 @@ docker compose ps
 ./scripts/docker-run-daft.sh --input s3://lake/pdfs.parquet --output s3://output/embeddings/
 ```
 
-### Uploading Test Data
-
-```bash
-# Upload local files to MinIO
-./scripts/upload-data.sh .data/food101 bucket/images/
-```
+> **Note:** The upload script uploads both Food-101 images and NYC Taxi data to MinIO.
+> This may take a few minutes for the 5000 images.
 
 ### Stopping
 

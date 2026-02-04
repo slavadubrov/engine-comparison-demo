@@ -9,9 +9,9 @@ distributed across a Spark cluster for data-lake-scale volumes.
 
 Usage:
   spark-submit spark_etl.py \\
-      --orders s3://lake/nyc_taxi/yellow_tripdata_*.parquet \\
-      --zones  s3://lake/nyc_taxi/taxi_zone_lookup.csv \\
-      --output s3://warehouse/nyc_taxi_report/
+      --orders s3a://lake/nyc_taxi/yellow_tripdata_*.parquet \\
+      --zones  s3a://lake/nyc_taxi/taxi_zone_lookup.csv \\
+      --output s3a://warehouse/nyc_taxi_report/
 """
 
 from __future__ import annotations
@@ -37,9 +37,9 @@ def create_session() -> SparkSession:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--orders", default="s3://lake/yellow_tripdata_*.parquet")
-    parser.add_argument("--zones", default="s3://lake/taxi_zone_lookup.csv")
-    parser.add_argument("--output", default="s3://warehouse/taxi_report/")
+    parser.add_argument("--orders", default="s3a://lake/taxi/*.parquet")
+    parser.add_argument("--zones", default="s3a://lake/taxi/taxi_zone_lookup.csv")
+    parser.add_argument("--output", default="s3a://warehouse/taxi_report/")
     args = parser.parse_args()
 
     spark = create_session()

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Engine Wars — Daft: Distributed Document Embedding Pipeline
-=============================================================
-S3 PDFs → Parse Text → GPU Embed → Parquet (all streaming, all Rust I/O)
+Engine Wars — Daft: Distributed Image Embedding Pipeline
+==========================================================
+S3 Images → Download → GPU Embed (CLIP) → Parquet (streaming, Rust I/O)
 
 Key points:
   - Class UDF: model loaded once per worker, reused across batches
@@ -11,67 +11,97 @@ Key points:
   - Same code: local laptop → Ray cluster → Daft Cloud
 
 Usage:
-  DAFT_RUNNER=ray python daft_pipeline.py --input s3://lake/pdfs.parquet
+  DAFT_RUNNER=ray python daft_pipeline.py --input s3://bucket/image_metadata.parquet
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import time
 
 import daft
 from daft import col
 
 
-@daft.udf(return_dtype=daft.DataType.string())
-def parse_pdf(pdf_bytes_col):
-    """CPU-bound: extract text from PDF bytes via PyMuPDF."""
-    import fitz
-
-    results = []
-    for pdf_bytes in pdf_bytes_col.to_pylist():
-        if pdf_bytes is None:
-            results.append(None)
-            continue
-        try:
-            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-            text = "\n".join(page.get_text() for page in doc)
-            doc.close()
-            results.append(text[:10_000] if text else None)
-        except Exception:
-            results.append(None)
-    return results
-
-
-@daft.udf(return_dtype=daft.DataType.list(daft.DataType.float32()))
-class TextEmbedder:
-    """GPU-bound: model loaded once, encode batches of text."""
+@daft.cls
+class ImageEmbedder:
+    """GPU-bound: CLIP model loaded once, encode batches of images."""
 
     def __init__(self):
-        from sentence_transformers import SentenceTransformer
+        import torch
+        import logging
 
-        self.model = SentenceTransformer("all-MiniLM-L6-v2", device="cuda")
+        # Suppress verbose transformers logging
+        logging.getLogger("transformers").setLevel(logging.ERROR)
 
-    def __call__(self, text_col):
-        texts = [t if t else "" for t in text_col.to_pylist()]
-        embeddings = self.model.encode(texts, batch_size=32)
-        return [emb.tolist() for emb in embeddings]
+        try:
+            from transformers import CLIPModel, CLIPProcessor
+        except ImportError:
+            # Fallback for some environments or versions
+            from transformers.models.clip.modeling_clip import CLIPModel
+            from transformers.models.clip.processing_clip import CLIPProcessor
+
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(
+            self.device
+        )
+        self.processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        self.model.eval()
+
+    @daft.method.batch(return_dtype=daft.DataType.python())
+    def __call__(self, image_bytes_col):
+        import io
+
+        import torch
+        from PIL import Image
+
+        embeddings = []
+        for img_bytes in image_bytes_col.to_pylist():
+            if img_bytes is None:
+                embeddings.append([0.0] * 512)  # CLIP base produces 512-dim embeddings
+                continue
+            try:
+                img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                inputs = self.processor(images=img, return_tensors="pt").to(self.device)
+                with torch.no_grad():
+                    features = self.model.get_image_features(**inputs)
+                emb = features[0].cpu().numpy().tolist()
+                embeddings.append(emb)
+            except Exception:
+                embeddings.append([0.0] * 512)
+        return embeddings
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", default="s3://lake/pdf_metadata.parquet")
+    parser.add_argument("--input", default="s3://bucket/image_metadata.parquet")
     parser.add_argument("--output", default="s3://output/embeddings/")
     args = parser.parse_args()
 
     t0 = time.perf_counter()
 
+    # Configure S3/MinIO endpoint for Daft I/O
+    endpoint_url = os.environ.get("AWS_ENDPOINT_URL", "http://minio:9000")
+    io_config = daft.io.IOConfig(
+        s3=daft.io.S3Config(
+            endpoint_url=endpoint_url,
+            key_id=os.environ.get("AWS_ACCESS_KEY_ID", "minioadmin"),
+            access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "minioadmin"),
+            region_name="us-east-1",  # MinIO default
+        )
+    )
+    daft.set_planning_config(default_io_config=io_config)
+
+    # Create instance of daft.cls
+    embedder = ImageEmbedder()
+
     df = (
         daft.read_parquet(args.input)
-        .with_column("pdf_bytes", col("pdf_url").url.download())
-        .with_column("text", parse_pdf(col("pdf_bytes")))
-        .exclude("pdf_bytes")
-        .with_column("embedding", TextEmbedder(col("text")))
+        .into_partitions(1)  # Limit concurrency to 2 workers for single GPU
+        .with_column("image_bytes", col("image_url").download())
+        .with_column("embedding", embedder(col("image_bytes")))
+        .exclude("image_bytes")
     )
     df.write_parquet(args.output)
 
