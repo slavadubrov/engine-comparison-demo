@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 450">
+  <defs>
+    <marker id="arrowGray" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#E25A1C"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#00A1E4"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#7B68EE"/>
+    </marker>
+    <linearGradient id="localGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4CAF50;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2E7D32;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="s3Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#C72C48;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8B1E3F;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Title -->
+  <text x="450" y="35" text-anchor="middle" font-family="system-ui, sans-serif" font-size="20" font-weight="bold" fill="#333">End-to-End Data Flow</text>
+
+  <!-- Stage 1: Local Data -->
+  <g transform="translate(30, 80)">
+    <rect x="0" y="0" width="120" height="100" rx="8" fill="url(#localGrad)" filter="url(#shadow)"/>
+    <text x="60" y="25" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="bold" fill="white">Local Data</text>
+    <text x="60" y="45" text-anchor="middle" font-family="monospace" font-size="9" fill="white">.data/</text>
+    <line x1="20" y1="55" x2="100" y2="55" stroke="white" stroke-opacity="0.5"/>
+    <text x="60" y="72" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="white">NYC Taxi</text>
+    <text x="60" y="88" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="white">Food-101 Images</text>
+  </g>
+
+  <!-- Arrow: Local to Upload Script -->
+  <line x1="150" y1="130" x2="185" y2="130" stroke="#666" stroke-width="2" marker-end="url(#arrowGray)"/>
+
+  <!-- Stage 2: Upload Script -->
+  <g transform="translate(190, 100)">
+    <rect x="0" y="0" width="100" height="60" rx="8" fill="#607D8B" filter="url(#shadow)"/>
+    <text x="50" y="25" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="bold" fill="white">upload-data.sh</text>
+    <text x="50" y="42" text-anchor="middle" font-family="monospace" font-size="9" fill="white">mc cp</text>
+  </g>
+
+  <!-- Arrow: Upload to MinIO -->
+  <line x1="290" y1="130" x2="325" y2="130" stroke="#666" stroke-width="2" marker-end="url(#arrowGray)"/>
+
+  <!-- Stage 3: MinIO Buckets -->
+  <g transform="translate(330, 70)">
+    <rect x="0" y="0" width="160" height="120" rx="8" fill="url(#s3Grad)" filter="url(#shadow)"/>
+    <text x="80" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="bold" fill="white">MinIO S3</text>
+
+    <rect x="15" y="35" width="60" height="30" rx="4" fill="white" fill-opacity="0.2"/>
+    <text x="45" y="55" text-anchor="middle" font-family="monospace" font-size="9" fill="white">lake/</text>
+
+    <rect x="85" y="35" width="60" height="30" rx="4" fill="white" fill-opacity="0.2"/>
+    <text x="115" y="55" text-anchor="middle" font-family="monospace" font-size="9" fill="white">bucket/</text>
+
+    <rect x="15" y="75" width="60" height="30" rx="4" fill="white" fill-opacity="0.2"/>
+    <text x="45" y="95" text-anchor="middle" font-family="monospace" font-size="9" fill="white">warehouse/</text>
+
+    <rect x="85" y="75" width="60" height="30" rx="4" fill="white" fill-opacity="0.2"/>
+    <text x="115" y="95" text-anchor="middle" font-family="monospace" font-size="9" fill="white">output/</text>
+  </g>
+
+  <!-- Pipeline branches -->
+  <!-- Branch point -->
+  <circle cx="540" cy="130" r="8" fill="#333"/>
+  <line x1="490" y1="130" x2="532" y2="130" stroke="#333" stroke-width="2"/>
+
+  <!-- Spark Branch (Top) -->
+  <path d="M 548 130 L 580 130 L 580 80 L 620 80" fill="none" stroke="#E25A1C" stroke-width="2" marker-end="url(#arrowOrange)"/>
+  <g transform="translate(625, 55)">
+    <rect x="0" y="0" width="120" height="50" rx="6" fill="#E25A1C" filter="url(#shadow)"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="bold" fill="white">Spark ETL</text>
+    <text x="60" y="38" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="white">Tabular Processing</text>
+  </g>
+
+  <!-- Ray Branch (Middle) -->
+  <line x1="548" y1="130" x2="620" y2="130" stroke="#00A1E4" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <g transform="translate(625, 105)">
+    <rect x="0" y="0" width="120" height="50" rx="6" fill="#00A1E4" filter="url(#shadow)"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="bold" fill="white">Ray Inference</text>
+    <text x="60" y="38" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="white">GPU Classification</text>
+  </g>
+
+  <!-- Daft Branch (Bottom) -->
+  <path d="M 548 130 L 580 130 L 580 180 L 620 180" fill="none" stroke="#7B68EE" stroke-width="2" marker-end="url(#arrowPurple)"/>
+  <g transform="translate(625, 155)">
+    <rect x="0" y="0" width="120" height="50" rx="6" fill="#7B68EE" filter="url(#shadow)"/>
+    <text x="60" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="bold" fill="white">Daft Pipeline</text>
+    <text x="60" y="38" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="white">CLIP Embeddings</text>
+  </g>
+
+  <!-- Output arrows -->
+  <line x1="745" y1="80" x2="795" y2="80" stroke="#E25A1C" stroke-width="2" marker-end="url(#arrowOrange)"/>
+  <line x1="745" y1="130" x2="795" y2="130" stroke="#00A1E4" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <line x1="745" y1="180" x2="795" y2="180" stroke="#7B68EE" stroke-width="2" marker-end="url(#arrowPurple)"/>
+
+  <!-- Outputs -->
+  <g transform="translate(800, 55)">
+    <rect x="0" y="0" width="85" height="150" rx="6" fill="#37474F" filter="url(#shadow)"/>
+    <text x="42" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="bold" fill="white">Outputs</text>
+    <line x1="10" y1="32" x2="75" y2="32" stroke="white" stroke-opacity="0.3"/>
+    <text x="42" y="52" text-anchor="middle" font-family="monospace" font-size="8" fill="#E25A1C">warehouse/</text>
+    <text x="42" y="65" text-anchor="middle" font-family="monospace" font-size="7" fill="#ccc">report/</text>
+    <text x="42" y="95" text-anchor="middle" font-family="monospace" font-size="8" fill="#00A1E4">bucket/</text>
+    <text x="42" y="108" text-anchor="middle" font-family="monospace" font-size="7" fill="#ccc">predictions/</text>
+    <text x="42" y="138" text-anchor="middle" font-family="monospace" font-size="8" fill="#7B68EE">bucket/</text>
+    <text x="42" y="151" text-anchor="middle" font-family="monospace" font-size="7" fill="#ccc">embeddings/</text>
+  </g>
+
+  <!-- Legend -->
+  <g transform="translate(30, 260)">
+    <text x="0" y="0" font-family="system-ui, sans-serif" font-size="13" font-weight="bold" fill="#333">Data Flow Summary</text>
+
+    <rect x="0" y="20" width="850" height="160" rx="8" fill="#f5f5f5" stroke="#ddd"/>
+
+    <text x="20" y="45" font-family="system-ui, sans-serif" font-size="11" font-weight="bold" fill="#333">1. Prepare Data</text>
+    <text x="30" y="62" font-family="system-ui, sans-serif" font-size="10" fill="#666">Run uv run python -m engine_comparison.data.loader to download datasets to .data/</text>
+
+    <text x="20" y="90" font-family="system-ui, sans-serif" font-size="11" font-weight="bold" fill="#333">2. Upload to MinIO</text>
+    <text x="30" y="107" font-family="system-ui, sans-serif" font-size="10" fill="#666">Run ./scripts/upload-data.sh to copy data to S3-compatible storage</text>
+
+    <text x="20" y="135" font-family="system-ui, sans-serif" font-size="11" font-weight="bold" fill="#333">3. Run Pipelines</text>
+    <text x="30" y="152" font-family="system-ui, sans-serif" font-size="10" fill="#E25A1C">Spark: NYC Taxi ETL (filter, join, aggregate) -> warehouse/report/</text>
+    <text x="30" y="167" font-family="system-ui, sans-serif" font-size="10" fill="#00A1E4">Ray: GPU image classification with ResNet-50 -> bucket/predictions/</text>
+    <text x="30" y="182" font-family="system-ui, sans-serif" font-size="10" fill="#7B68EE">Daft: CLIP image embeddings (512-dim vectors) -> bucket/embeddings/</text>
+  </g>
+</svg>
