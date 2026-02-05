@@ -1,8 +1,64 @@
 # The Engine Wars — Live Demo
 
-**Benchmark Pandas vs. Polars vs. DataFusion vs. Daft on real-world datasets.**
+**Companion repository for ["The Engine Wars" article series](https://example.com/engine-wars).**
 
-No synthetic data. No toy examples. Real NYC taxi trips and real food photos.
+This repository provides hands-on benchmarking and exploration of modern DataFrame engines — Pandas, Polars, DataFusion, Daft, and native Rust implementations. No synthetic data. No toy examples. Real NYC taxi trips and real food photos.
+
+---
+
+## What's Inside
+
+This repo has **two parts**:
+
+### Part 1: Benchmarking Scripts
+
+Run reproducible benchmarks yourself and compare results on your own hardware:
+
+- **Python packages** — Pandas, Polars, DataFusion, Daft
+- **Native Rust scripts** — Polars-rs and `image` crate for raw performance comparison
+
+See [Benchmark Results](#benchmark-results) for our latest run.
+
+### Part 2: Interactive Notebooks
+
+Explore different DataFrame engines with ready-to-run examples:
+
+- [`engine_comparison_examples.ipynb`](notebook/engine_comparison_examples.ipynb) — Side-by-side examples of Pandas, Polars, DataFusion, and Daft APIs
+- [`distributed_spark.ipynb`](notebook/distributed_spark.ipynb) — PySpark tabular ETL
+- [`distributed_ray.ipynb`](notebook/distributed_ray.ipynb) — Ray Data GPU image classification
+- [`distributed_daft.ipynb`](notebook/distributed_daft.ipynb) — Daft multimodal pipeline with CLIP embeddings
+
+You can also spin up distributed services via Docker Compose to test cluster-scale patterns locally.
+
+---
+
+## Benchmark Results
+
+Combined results from Python engines and native Rust benchmarks on ~2.9M NYC taxi trips and 500 food images.
+
+### Tabular Benchmark (Python + Rust)
+
+![Combined Tabular Benchmark — Python Engines + Polars-rs](benchmarks/combined_tabular.png)
+
+| Operation | Pandas | Polars | DataFusion | Daft | Polars-rs (Rust) |
+|---|---|---|---|---|---|
+| Read Parquet | 0.06s | 0.05s | 0.08s | 0.08s | **0.04s** |
+| Filter | 0.02s | 0.03s | 0.08s | 0.10s | **0.05s** |
+| GroupBy + Agg | 0.08s | 0.02s | 0.03s | 0.03s | **0.02s** |
+| Join | 0.13s | 0.14s | 0.22s | 0.18s | **0.07s** |
+| ETL Pipeline | 0.20s | 0.05s | 0.04s | 0.08s | **0.04s** |
+
+### Multimodal Benchmark (Python + Rust)
+
+![Combined Multimodal Benchmark — Python vs Rust](benchmarks/combined_multimodal.png)
+
+| Operation | Pandas + Pillow | Daft | Rust `image` | Speedup |
+|---|---|---|---|---|
+| Load Images | 0.40s | — | **0.06s** | 6.2× |
+| Resize 224×224 | 0.59s | — | **0.19s** | 3.0× |
+| Total Pipeline | 1.04s | 0.54s | **0.26s** | 4.0× |
+
+> Polars and DataFusion are excluded from multimodal because they lack native image operations — image work would still go through sequential Python.
 
 ---
 
@@ -26,83 +82,6 @@ uv run python -m engine_comparison.benchmarks.multimodal
 ```
 
 First run downloads ~50 MB of data. Subsequent runs use the cache in `.data/`.
-
----
-
-## Datasets
-
-### Tabular: NYC Yellow Taxi Trip Records
-
-| Attribute | Value |
-|---|---|
-| Source | [NYC Taxi & Limousine Commission](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) |
-| Format | Apache Parquet |
-| Default | January 2024 (~2.9M rows × 19 columns, ~45 MB) |
-| Join table | Taxi Zone Lookup (265 zones with borough names) |
-
-Real taxi trip records: pickup/dropoff times, locations, distances, fares,
-tips, payment types. The join table maps numeric location IDs to human-readable
-borough and zone names (e.g., "Manhattan — Upper East Side North").
-
-### Multimodal: Food-101 (ETH Zurich)
-
-| Attribute | Value |
-|---|---|
-| Source | [ETH Zurich via Hugging Face](https://huggingface.co/datasets/ethz/food101) |
-| Format | JPEG images |
-| Default | 500 images (configurable) |
-| Content | Real food photos — pizza, sushi, steak, etc. |
-
-Real photographs of food in 101 categories. Variable sizes and aspect ratios,
-exactly like production ML preprocessing pipelines encounter.
-
----
-
-## What's Benchmarked
-
-### `bench_tabular.py` — Tabular Operations
-
-| Operation | What it tests | Real-world analogy |
-|---|---|---|
-| Read Parquet | Full scan of ~45 MB file | Loading a dataset for analysis |
-| Filter | `distance > 5mi AND fare > $30` | Finding high-value trips |
-| GroupBy + Agg | Revenue by payment type | Payment analytics dashboard |
-| Join | Trip data ⟕ Zone lookup | Enriching with borough names |
-| ETL Pipeline | Filter → Join → Aggregate → Sort | Building a revenue report |
-
-Engines: **Pandas** · **Polars** · **DataFusion** · **Daft**
-
-### `bench_multimodal.py` — Image Processing
-
-| Operation | What it tests | Real-world analogy |
-|---|---|---|
-| Load Images | Read + decode JPEGs | ML data pipeline ingestion |
-| Resize 224×224 | Resize to model input size | Preprocessing for ResNet/ViT |
-| Total Pipeline | Load → Decode → Resize | End-to-end ML preprocessing |
-
-Engines: **Pandas + Pillow** (sequential) vs. **Daft** (parallel Rust)
-
-> Polars and DataFusion are excluded from the multimodal benchmark because
-> they lack native image operations — image work would still go through
-> sequential Python.
-
----
-
-## CLI Options
-
-```bash
-# Tabular: change data month
-uv run python -m engine_comparison.benchmarks.tabular --year 2023 --month 6
-
-# Tabular: more timing precision
-uv run python -m engine_comparison.benchmarks.tabular --runs 5
-
-# Multimodal: more images = larger speedup (more parallelism)
-uv run python -m engine_comparison.benchmarks.multimodal --images 1000
-
-# Multimodal: quick smoke test
-uv run python -m engine_comparison.benchmarks.multimodal --images 100
-```
 
 ---
 
@@ -147,6 +126,117 @@ cd rust_benchmark && cargo run --release && cd ..
 # Re-aggregate existing JSON files into charts
 uv run python -m engine_comparison.benchmarks.aggregate
 ```
+
+---
+
+## CLI Options
+
+```bash
+# Tabular: change data month
+uv run python -m engine_comparison.benchmarks.tabular --year 2023 --month 6
+
+# Tabular: more timing precision
+uv run python -m engine_comparison.benchmarks.tabular --runs 5
+
+# Multimodal: more images = larger speedup (more parallelism)
+uv run python -m engine_comparison.benchmarks.multimodal --images 1000
+
+# Multimodal: quick smoke test
+uv run python -m engine_comparison.benchmarks.multimodal --images 100
+```
+
+---
+
+## Datasets
+
+### Tabular: NYC Yellow Taxi Trip Records
+
+| Attribute | Value |
+|---|---|
+| Source | [NYC Taxi & Limousine Commission](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) |
+| Format | Apache Parquet |
+| Default | January 2024 (~2.9M rows × 19 columns, ~45 MB) |
+| Join table | Taxi Zone Lookup (265 zones with borough names) |
+
+Real taxi trip records: pickup/dropoff times, locations, distances, fares,
+tips, payment types. The join table maps numeric location IDs to human-readable
+borough and zone names (e.g., "Manhattan — Upper East Side North").
+
+### Multimodal: Food-101 (ETH Zurich)
+
+| Attribute | Value |
+|---|---|
+| Source | [ETH Zurich via Hugging Face](https://huggingface.co/datasets/ethz/food101) |
+| Format | JPEG images |
+| Default | 500 images (configurable) |
+| Content | Real food photos — pizza, sushi, steak, etc. |
+
+Real photographs of food in 101 categories. Variable sizes and aspect ratios,
+exactly like production ML preprocessing pipelines encounter.
+
+---
+
+## What's Benchmarked
+
+### Tabular Operations (`tabular.py`)
+
+| Operation | What it tests | Real-world analogy |
+|---|---|---|
+| Read Parquet | Full scan of ~45 MB file | Loading a dataset for analysis |
+| Filter | `distance > 5mi AND fare > $30` | Finding high-value trips |
+| GroupBy + Agg | Revenue by payment type | Payment analytics dashboard |
+| Join | Trip data ⟕ Zone lookup | Enriching with borough names |
+| ETL Pipeline | Filter → Join → Aggregate → Sort | Building a revenue report |
+
+Engines: **Pandas** · **Polars** · **DataFusion** · **Daft** · **Polars-rs (Rust)**
+
+### Image Processing (`multimodal.py`)
+
+| Operation | What it tests | Real-world analogy |
+|---|---|---|
+| Load Images | Read + decode JPEGs | ML data pipeline ingestion |
+| Resize 224×224 | Resize to model input size | Preprocessing for ResNet/ViT |
+| Total Pipeline | Load → Decode → Resize | End-to-end ML preprocessing |
+
+Engines: **Pandas + Pillow** (sequential) vs. **Daft** (parallel Rust) vs. **Rust `image`** (native)
+
+---
+
+## Interactive Notebooks
+
+### Local Examples
+
+The [`engine_comparison_examples.ipynb`](notebook/engine_comparison_examples.ipynb) notebook contains side-by-side examples of:
+
+- Reading and writing Parquet files
+- Filtering, aggregation, and joins
+- ETL pipelines
+- API comparisons between Pandas, Polars, DataFusion, and Daft
+
+### Distributed Notebooks (Docker Compose)
+
+Three Jupyter notebooks let you explore distributed engines interactively:
+
+| Notebook | Engine | Workload |
+|----------|--------|----------|
+| `distributed_spark.ipynb` | PySpark | Tabular ETL — filter, join, aggregate, window functions |
+| `distributed_ray.ipynb` | Ray Data | GPU image classification with ActorPoolStrategy |
+| `distributed_daft.ipynb` | Daft | Multimodal pipeline — Rust I/O, CLIP embedding, Arrow interop |
+
+#### Quick Start (Docker)
+
+```bash
+# 1. Start services (Ray+Daft example — swap ray-head for spark-master for Spark)
+docker compose up -d minio minio-setup ray-head app
+
+# 2. Upload sample data
+./scripts/upload-data.sh
+
+# 3. Launch Jupyter Lab
+docker compose exec app jupyter lab --ip 0.0.0.0 --port 8888 --allow-root --no-browser --notebook-dir=/app/notebook
+```
+
+Open <http://localhost:8888> and select a notebook. Each notebook includes setup instructions for its specific services.
 
 ---
 
@@ -248,37 +338,6 @@ docker compose down -v       # Stop and remove volumes (clears MinIO data)
 | Slow performance | Run one pipeline at a time; don't mix Spark + Ray simultaneously |
 | Daft "bucket not found" error | Ensure MinIO setup completed (`docker compose logs minio-setup`) |
 
-### Documentation
-
-For architecture diagrams and detailed explanations, see [docs/architecture.md](docs/architecture.md).
-
----
-
-## Notebooks (Interactive, Docker)
-
-Three Jupyter notebooks let you explore each distributed engine interactively inside Docker Compose.
-
-| Notebook | Engine | Workload |
-|----------|--------|----------|
-| `notebook/distributed_spark.ipynb` | PySpark | Tabular ETL — filter, join, aggregate, window functions |
-| `notebook/distributed_ray.ipynb` | Ray Data | GPU image classification with ActorPoolStrategy |
-| `notebook/distributed_daft.ipynb` | Daft | Multimodal pipeline — Rust I/O, CLIP embedding, Arrow interop |
-
-### Quick Start
-
-```bash
-# 1. Start services (Ray+Daft example — swap ray-head for spark-master for Spark)
-docker compose up -d minio minio-setup ray-head app
-
-# 2. Upload sample data
-./scripts/upload-data.sh
-
-# 3. Launch Jupyter Lab
-docker compose exec app jupyter lab --ip 0.0.0.0 --port 8888 --allow-root --no-browser --notebook-dir=/app/notebook
-```
-
-Open <http://localhost:8888> and select a notebook. Each notebook includes setup instructions for its specific services.
-
 ---
 
 ## Distributed Scripts (Cluster Required)
@@ -295,54 +354,6 @@ implementations for cluster-scale processing:
 Install extras: `uv sync --extra distributed`
 
 These require actual cluster infrastructure (Ray, Spark, or Daft Cloud).
-
----
-
-## Expected Output
-
-### Tabular benchmark
-
-```
-⚡ Engine Wars — NYC Taxi Benchmark Results
-┏━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┓
-┃ Operation        ┃           Pandas ┃           Polars ┃       DataFusion ┃             Daft ┃
-┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━┩
-│ Read Parquet     │           0.062s │      0.062s 1.0× │      0.073s 0.8× │      0.067s 0.9× │
-├──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┤
-│ Filter           │           0.016s │      0.024s 0.7× │      0.059s 0.3× │      0.083s 0.2× │
-├──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┤
-│ GroupBy + Agg    │           0.068s │      0.019s 3.7× │      0.023s 3.0× │      0.023s 3.0× │
-├──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┤
-│ Join             │           0.121s │      0.098s 1.2× │      0.164s 0.7× │      0.141s 0.9× │
-├──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┤
-│ ETL Pipeline     │           0.153s │      0.039s 4.0× │      0.038s 4.0× │      0.070s 2.2× │
-├──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┤
-│ Total            │            0.42s │       0.24s 1.7× │       0.36s 1.2× │       0.38s 1.1× │
-└──────────────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────┘
-```
-
-*(Results from a 10-core Mac — your numbers will vary by hardware.)*
-
-![Tabular Benchmark Results](benchmarks/benchmark_results.png)
-
-### Multimodal benchmark
-
-```
-🖼  Engine Wars — Food-101 Multimodal Benchmark
-┏━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
-┃ Operation          ┃    Pandas + Pillow ┃        Daft (Rust) ┃    Speedup ┃
-┡━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
-│ Load Images        │             3.840s │             3.863s │       1.0× │
-├────────────────────┼────────────────────┼────────────────────┼────────────┤
-│ Resize 224×224     │             5.775s │             3.321s │       1.7× │
-├────────────────────┼────────────────────┼────────────────────┼────────────┤
-│ Total Pipeline     │            10.980s │             3.832s │       2.9× │
-└────────────────────┴────────────────────┴────────────────────┴────────────┘
-```
-
-![Multimodal Benchmark Results](benchmarks/multimodal_results.png)
-
-Saves `multimodal_results.png` — a comparison chart.
 
 ---
 
@@ -388,6 +399,11 @@ engine-comparison-demo/
 │       ├── ray_inference.py            # Ray Data GPU inference
 │       ├── daft_pipeline.py            # Daft distributed embedding
 │       └── spark_etl.py                # PySpark ETL
+├── notebook/                           # Interactive notebooks
+│   ├── engine_comparison_examples.ipynb
+│   ├── distributed_spark.ipynb
+│   ├── distributed_ray.ipynb
+│   └── distributed_daft.ipynb
 ├── benchmarks/                         # Benchmark outputs
 │   ├── *.json                          # JSON reports
 │   └── *.png                           # Charts
@@ -396,3 +412,9 @@ engine-comparison-demo/
     ├── taxi_zone_lookup.csv
     └── food101_images/
 ```
+
+---
+
+## License
+
+MIT
