@@ -106,6 +106,50 @@ uv run python -m engine_comparison.benchmarks.multimodal --images 100
 
 ---
 
+## Full Benchmark Pipeline (Python + Rust)
+
+Run both Python and native Rust benchmarks, then aggregate results into combined charts:
+
+```bash
+# Run the complete pipeline
+./scripts/run_benchmarks.sh
+```
+
+This executes:
+
+1. **Python tabular** → `benchmarks/tabular_results.json`
+2. **Python multimodal** → `benchmarks/multimodal_results.json`
+3. **Rust benchmarks** (Polars-rs + image) → `benchmarks/rust_*.json`
+4. **Aggregator** → `benchmarks/combined_*.png`
+
+### Rust Requirements
+
+The Rust benchmark requires the Rust toolchain:
+
+```bash
+# Install Rust (if needed)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Build the Rust benchmark (first run compiles dependencies)
+cd rust_benchmark && cargo build --release && cd ..
+```
+
+### Individual Rust Benchmark
+
+```bash
+# Run Rust benchmarks standalone (after Python benchmarks to ensure data exists)
+cd rust_benchmark && cargo run --release && cd ..
+```
+
+### Aggregate Results Only
+
+```bash
+# Re-aggregate existing JSON files into charts
+uv run python -m engine_comparison.benchmarks.aggregate
+```
+
+---
+
 ## Docker Compose (Distributed Stack)
 
 Run the distributed pipelines locally using Docker Compose with GPU support.
@@ -127,6 +171,7 @@ docker compose build
 ```
 
 **For Daft/Ray pipelines:**
+
 ```bash
 # Start minimal stack (MinIO + Ray + App container)
 docker compose up -d minio minio-setup ray-head app
@@ -142,6 +187,7 @@ docker compose up -d minio minio-setup ray-head app
 ```
 
 **For Spark pipelines:**
+
 ```bash
 # Start Spark stack (MinIO + Spark)
 docker compose up -d minio minio-setup spark-master
@@ -165,11 +211,13 @@ The docker-compose.yml is optimized for single-GPU setups:
 | app | — | 8 GB | Enabled (Ray client) |
 
 **To scale Spark workers:**
+
 ```bash
 docker compose up -d --scale spark-worker=1 spark-worker
 ```
 
 **To stop GPU-heavy services:**
+
 ```bash
 docker compose stop ray-head spark-worker
 ```
@@ -178,9 +226,9 @@ docker compose stop ray-head spark-worker
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| MinIO Console | http://localhost:9001 | S3 browser (login: `minioadmin` / `minioadmin`) |
-| Spark UI | http://localhost:8080 | Spark master dashboard |
-| Ray Dashboard | http://localhost:8265 | Ray cluster status |
+| MinIO Console | <http://localhost:9001> | S3 browser (login: `minioadmin` / `minioadmin`) |
+| Spark UI | <http://localhost:8080> | Spark master dashboard |
+| Ray Dashboard | <http://localhost:8265> | Ray cluster status |
 
 ### Stopping
 
@@ -229,7 +277,7 @@ docker compose up -d minio minio-setup ray-head app
 docker compose exec app jupyter lab --ip 0.0.0.0 --port 8888 --allow-root --no-browser --notebook-dir=/app/notebook
 ```
 
-Open http://localhost:8888 and select a notebook. Each notebook includes setup instructions for its specific services.
+Open <http://localhost:8888> and select a notebook. Each notebook includes setup instructions for its specific services.
 
 ---
 
@@ -316,10 +364,14 @@ engine-comparison-demo/
 ├── Dockerfile                          # GPU-enabled Python container
 ├── docker-compose.yml                  # Spark, Ray, MinIO stack
 ├── scripts/
+│   ├── run_benchmarks.sh               # Full pipeline orchestration
 │   ├── docker-run-spark.sh             # Run Spark ETL
 │   ├── docker-run-ray.sh               # Run Ray inference
 │   ├── docker-run-daft.sh              # Run Daft pipeline
 │   └── upload-data.sh                  # Upload to MinIO
+├── rust_benchmark/                     # Native Rust benchmarks
+│   ├── Cargo.toml                      # Rust dependencies
+│   └── src/main.rs                     # Polars-rs + image benchmarks
 ├── src/engine_comparison/              # Main package
 │   ├── __init__.py
 │   ├── constants.py                    # Centralized configuration
@@ -329,16 +381,18 @@ engine-comparison-demo/
 │   ├── benchmarks/
 │   │   ├── __init__.py
 │   │   ├── tabular.py                  # NYC Taxi benchmark
-│   │   └── multimodal.py               # Food-101 benchmark
+│   │   ├── multimodal.py               # Food-101 benchmark
+│   │   └── aggregate.py                # Combine Python + Rust results
 │   └── distributed/
 │       ├── __init__.py
 │       ├── ray_inference.py            # Ray Data GPU inference
 │       ├── daft_pipeline.py            # Daft distributed embedding
 │       └── spark_etl.py                # PySpark ETL
+├── benchmarks/                         # Benchmark outputs
+│   ├── *.json                          # JSON reports
+│   └── *.png                           # Charts
 └── .data/                              # Auto-created cache (gitignored)
-    ├── nyc_taxi/
-    │   ├── yellow_tripdata_2024-01.parquet
-    │   └── taxi_zone_lookup.csv
-    └── food101/
-        └── food_00000.jpg ... food_04999.jpg
+    ├── yellow_tripdata.parquet
+    ├── taxi_zone_lookup.csv
+    └── food101_images/
 ```

@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import argparse
 import gc
+import json
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import daft
@@ -47,6 +49,7 @@ from engine_comparison.constants import (
     DEFAULT_TAXI_MONTH,
     DEFAULT_TAXI_YEAR,
     TABULAR_CHART_OUTPUT,
+    TABULAR_JSON_OUTPUT,
 )
 from engine_comparison.data.loader import load_nyc_taxi
 
@@ -494,6 +497,24 @@ def save_chart(
     plt.close(fig)
 
 
+def save_json_report(
+    all_results: dict[str, dict],
+    dataset_info: dict,
+    output_path: str = TABULAR_JSON_OUTPUT,
+) -> None:
+    """Save benchmark results as JSON for aggregation with Rust benchmarks."""
+    report = {
+        "benchmark": "tabular",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "dataset": dataset_info,
+        "results": all_results,
+    }
+    BENCHMARKS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(report, f, indent=2)
+    console.print(f"[bold green]JSON report saved → {output_path}[/]\n")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -531,6 +552,15 @@ def main():
     # Dataset info
     meta = pq.read_metadata(trips_str)
     size_mb = trips_path.stat().st_size / (1024 * 1024)
+
+    dataset_info = {
+        "name": "NYC Yellow Taxi",
+        "year": args.year,
+        "month": args.month,
+        "rows": meta.num_rows,
+        "columns": meta.num_columns,
+        "size_mb": round(size_mb, 1),
+    }
 
     console.print(
         Panel(
@@ -572,6 +602,7 @@ def main():
     # --- Results ---
     render_table(all_results)
     save_chart(all_results)
+    save_json_report(all_results, dataset_info)
 
 
 if __name__ == "__main__":

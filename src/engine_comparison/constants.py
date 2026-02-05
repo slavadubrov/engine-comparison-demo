@@ -55,3 +55,24 @@ TABULAR_CHART_OUTPUT = BENCHMARKS_OUTPUT_DIR / "benchmark_results.png"
 
 MULTIMODAL_CHART_OUTPUT = BENCHMARKS_OUTPUT_DIR / "multimodal_results.png"
 """Output path for multimodal benchmark chart."""
+
+# JSON outputs for Python benchmarks
+TABULAR_JSON_OUTPUT = BENCHMARKS_OUTPUT_DIR / "tabular_results.json"
+"""Output path for tabular benchmark JSON report."""
+
+MULTIMODAL_JSON_OUTPUT = BENCHMARKS_OUTPUT_DIR / "multimodal_results.json"
+"""Output path for multimodal benchmark JSON report."""
+
+# JSON outputs for Rust benchmarks (read by aggregator)
+RUST_TABULAR_JSON_OUTPUT = BENCHMARKS_OUTPUT_DIR / "rust_tabular_results.json"
+"""Output path for Rust tabular benchmark JSON report."""
+
+RUST_MULTIMODAL_JSON_OUTPUT = BENCHMARKS_OUTPUT_DIR / "rust_multimodal_results.json"
+"""Output path for Rust multimodal benchmark JSON report."""
+
+# Combined chart outputs
+COMBINED_TABULAR_CHART = BENCHMARKS_OUTPUT_DIR / "combined_tabular.png"
+"""Output path for combined tabular benchmark chart (Python + Rust)."""
+
+COMBINED_MULTIMODAL_CHART = BENCHMARKS_OUTPUT_DIR / "combined_multimodal.png"
+"""Output path for combined multimodal benchmark chart (Python + Rust)."""

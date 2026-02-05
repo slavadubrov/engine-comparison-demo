@@ -27,8 +27,10 @@ from __future__ import annotations
 
 import argparse
 import gc
+import json
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import daft
@@ -46,6 +48,7 @@ from engine_comparison.constants import (
     BENCHMARKS_OUTPUT_DIR,
     DEFAULT_N_IMAGES,
     MULTIMODAL_CHART_OUTPUT,
+    MULTIMODAL_JSON_OUTPUT,
     TARGET_IMAGE_SIZE,
 )
 from engine_comparison.data.loader import load_food101_images
@@ -126,40 +129,17 @@ def bench_daft_native(image_dir: Path, n_images: int) -> dict:
 
     All heavy work runs in the Rust engine, completely bypassing Python's
     GIL. On a 16-core machine, all 16 cores participate.
+
+    NOTE: Daft uses lazy execution, so load/decode/resize happen together
+    in an optimized pipeline. We measure the end-to-end time only.
+    Individual operation times cannot be isolated.
     """
     results: dict[str, float] = {}
     glob_pattern = str(image_dir / "*.jpg")
 
-    # --- Load + Decode images ---
-    gc.collect()
-    t0 = time.perf_counter()
-
-    df = (
-        daft.from_glob_path(glob_pattern)
-        .limit(n_images)
-        .with_column("image", col("path").download().decode_image())
-    )
-    df.collect()
-
-    results["Load Images"] = time.perf_counter() - t0
-
-    # --- Resize ---
-    gc.collect()
-    t0 = time.perf_counter()
-
-    df_resized = (
-        daft.from_glob_path(glob_pattern)
-        .limit(n_images)
-        .with_column("image", col("path").download().decode_image())
-        .with_column(
-            "resized", col("image").resize(TARGET_IMAGE_SIZE[0], TARGET_IMAGE_SIZE[1])
-        )
-    )
-    df_resized.collect()
-
-    results["Resize 224×224"] = time.perf_counter() - t0
-
     # --- Full pipeline: load → decode → resize (end-to-end) ---
+    # Daft's lazy execution fuses all operations together for optimal
+    # performance. We can only measure the total time, not individual steps.
     gc.collect()
     t0 = time.perf_counter()
 
@@ -171,9 +151,13 @@ def bench_daft_native(image_dir: Path, n_images: int) -> dict:
             "resized", col("image").resize(TARGET_IMAGE_SIZE[0], TARGET_IMAGE_SIZE[1])
         )
     )
-    result = df_full.collect()
+    df_full.collect()
 
-    results["Total Pipeline"] = time.perf_counter() - t0
+    total_time = time.perf_counter() - t0
+
+    # We report Total Pipeline only. Individual operations are fused and
+    # cannot be separated in Daft's execution model.
+    results["Total Pipeline"] = total_time
 
     return results
 
@@ -286,6 +270,28 @@ def save_chart(
     plt.close(fig)
 
 
+def save_json_report(
+    pandas_results: dict,
+    daft_results: dict,
+    dataset_info: dict,
+    output_path: str = MULTIMODAL_JSON_OUTPUT,
+) -> None:
+    """Save benchmark results as JSON for aggregation with Rust benchmarks."""
+    report = {
+        "benchmark": "multimodal",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "dataset": dataset_info,
+        "results": {
+            "Pandas + Pillow": pandas_results,
+            "Daft": daft_results,
+        },
+    }
+    BENCHMARKS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(report, f, indent=2)
+    console.print(f"[bold green]JSON report saved → {output_path}[/]\n")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -315,6 +321,13 @@ def main():
         img = Image.open(p)
         sample_sizes.append(f"{img.size[0]}×{img.size[1]}")
 
+    dataset_info = {
+        "name": "Food-101",
+        "images": n,
+        "target_size": list(TARGET_IMAGE_SIZE),
+        "cpu_cores": os.cpu_count(),
+    }
+
     console.print(
         Panel(
             f"[bold]Engine Wars — Multimodal Image Benchmark[/]\n\n"
@@ -342,6 +355,7 @@ def main():
     # --- Results ---
     render_results(pandas_results, daft_results)
     save_chart(pandas_results, daft_results)
+    save_json_report(pandas_results, daft_results, dataset_info)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,42 @@
+{
+  "benchmark": "tabular",
+  "timestamp": "2026-02-05T22:11:23.500751+00:00",
+  "dataset": {
+    "name": "NYC Yellow Taxi",
+    "year": 2024,
+    "month": 1,
+    "rows": 2964624,
+    "columns": 19,
+    "size_mb": 47.6
+  },
+  "results": {
+    "Pandas": {
+      "Read Parquet": 0.06489541599967197,
+      "Filter": 0.017436875000385044,
+      "GroupBy + Agg": 0.07693179199986844,
+      "Join": 0.12743799999998373,
+      "ETL Pipeline": 0.20091020900008516
+    },
+    "Polars": {
+      "Read Parquet": 0.052021624999724736,
+      "Filter": 0.03168345800031602,
+      "GroupBy + Agg": 0.02191283399997701,
+      "Join": 0.14070437500004118,
+      "ETL Pipeline": 0.04580775000022186
+    },
+    "DataFusion": {
+      "Read Parquet": 0.07847762499977762,
+      "Filter": 0.07640149999997448,
+      "GroupBy + Agg": 0.02564579199997752,
+      "Join": 0.22316283400004977,
+      "ETL Pipeline": 0.03870841700017991
+    },
+    "Daft": {
+      "Read Parquet": 0.07715595799982111,
+      "Filter": 0.09616425000012896,
+      "GroupBy + Agg": 0.026053499999761698,
+      "Join": 0.18194025000002512,
+      "ETL Pipeline": 0.0820384999997259
+    }
+  }
+}

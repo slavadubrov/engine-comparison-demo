@@ -1,0 +1,24 @@
+{
+  "benchmark": "multimodal",
+  "timestamp": "2026-02-05T22:11:26.991332+00:00",
+  "dataset": {
+    "name": "Food-101",
+    "images": 500,
+    "target_size": [
+      224,
+      224
+    ],
+    "cpu_cores": 10
+  },
+  "results": {
+    "Pandas + Pillow": {
+      "Load Images": 0.3958460409999134,
+      "Resize 224\u00d7224": 0.5864466670000184,
+      "To Tensor": 0.05436233299997184,
+      "Total Pipeline": 1.0366550409999036
+    },
+    "Daft": {
+      "Total Pipeline": 0.5364549169999009
+    }
+  }
+}
