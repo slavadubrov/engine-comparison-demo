@@ -206,6 +206,33 @@ For architecture diagrams and detailed explanations, see [docs/architecture.md](
 
 ---
 
+## Notebooks (Interactive, Docker)
+
+Three Jupyter notebooks let you explore each distributed engine interactively inside Docker Compose.
+
+| Notebook | Engine | Workload |
+|----------|--------|----------|
+| `notebook/distributed_spark.ipynb` | PySpark | Tabular ETL — filter, join, aggregate, window functions |
+| `notebook/distributed_ray.ipynb` | Ray Data | GPU image classification with ActorPoolStrategy |
+| `notebook/distributed_daft.ipynb` | Daft | Multimodal pipeline — Rust I/O, CLIP embedding, Arrow interop |
+
+### Quick Start
+
+```bash
+# 1. Start services (Ray+Daft example — swap ray-head for spark-master for Spark)
+docker compose up -d minio minio-setup ray-head app
+
+# 2. Upload sample data
+./scripts/upload-data.sh
+
+# 3. Launch Jupyter Lab
+docker compose exec app jupyter lab --ip 0.0.0.0 --port 8888 --allow-root --no-browser --notebook-dir=/app/notebook
+```
+
+Open http://localhost:8888 and select a notebook. Each notebook includes setup instructions for its specific services.
+
+---
+
 ## Distributed Scripts (Cluster Required)
 
 The `src/engine_comparison/distributed/` directory contains reference

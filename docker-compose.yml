@@ -176,10 +176,13 @@ services:
       - AWS_ENDPOINT_URL=http://minio:9000
       - AWS_ACCESS_KEY_ID=minioadmin
       - AWS_SECRET_ACCESS_KEY=minioadmin
+    ports:
+      - "8888:8888"   # Jupyter Lab
     volumes:
       - ./src:/app/src
       - ./.data:/app/.data
       - ./benchmarks:/app/benchmarks
+      - ./notebook:/app/notebook
     depends_on:
       - spark-master
       - ray-head

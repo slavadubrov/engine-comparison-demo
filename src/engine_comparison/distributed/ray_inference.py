@@ -93,7 +93,31 @@ def main():
     )
     predictions.write_parquet(args.output)
 
-    print(f"\n✓ Complete in {time.perf_counter() - t0:.1f}s → {args.output}")
+    elapsed = time.perf_counter() - t0
+
+    # --- Result summary ---
+    results = ray.data.read_parquet(args.output)
+    total = results.count()
+    print(f"\n✓ Complete in {elapsed:.1f}s → {args.output}")
+    print(f"  Total predictions: {total:,}")
+
+    print("\n── Sample Predictions ──")
+    results.show(10)
+
+    # Class distribution (top-5)
+    import pandas as pd
+
+    sample = results.to_pandas()
+    class_counts = sample["prediction"].value_counts().head(5)
+    print("\n── Top-5 Predicted Classes ──")
+    for cls, count in class_counts.items():
+        print(f"  {cls}: {count}")
+
+    # Confidence stats
+    conf = sample["confidence"]
+    print(f"\n── Confidence Stats ──")
+    print(f"  avg={conf.mean():.4f}  min={conf.min():.4f}  max={conf.max():.4f}")
+
     ray.shutdown()
 
 

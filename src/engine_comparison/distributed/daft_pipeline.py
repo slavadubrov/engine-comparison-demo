@@ -21,6 +21,7 @@ import os
 import time
 
 import daft
+import numpy as np
 from daft import col
 
 
@@ -118,7 +119,29 @@ def main():
     )
     df.write_parquet(args.output)
 
-    print(f"\n✓ Complete in {time.perf_counter() - t0:.1f}s → {args.output}")
+    elapsed = time.perf_counter() - t0
+
+    # --- Result summary ---
+    results = daft.read_parquet(args.output, io_config=io_config)
+    total = results.count_rows()
+    print(f"\n✓ Complete in {elapsed:.1f}s → {args.output}")
+    print(f"  Total rows embedded: {total:,}")
+
+    print("\n── Sample Rows ──")
+    sample = results.limit(5).to_pandas()
+    for _, row in sample.iterrows():
+        emb = row["embedding"]
+        emb_preview = ", ".join(f"{v:.4f}" for v in emb[:5])
+        print(f"  {row['image_url'][:60]}  [{emb_preview}, ...]")
+
+    # Embedding stats
+
+    all_emb = np.array(results.select("embedding").to_pandas()["embedding"].tolist())
+    dim = all_emb.shape[1]
+    nonzero_rate = (all_emb != 0).mean()
+    print(f"\n── Embedding Stats ──")
+    print(f"  dimensionality: {dim}")
+    print(f"  non-zero rate:  {nonzero_rate:.2%}")
 
 
 if __name__ == "__main__":

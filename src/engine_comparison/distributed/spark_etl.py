@@ -69,10 +69,26 @@ def main():
         .orderBy("Borough", "rank")
     )
 
+    report.cache()
     report.write.partitionBy("Borough").mode("overwrite").parquet(args.output)
 
     elapsed = time.perf_counter() - t0
-    print(f"\n✓ {report.count():,} rows written in {elapsed:.1f}s → {args.output}")
+    row_count = report.count()
+
+    # --- Summary stats ---
+    stats = report.agg(
+        F.sum("revenue").alias("total_revenue"),
+        F.sum("trips").alias("total_trips"),
+        F.countDistinct("Borough").alias("boroughs"),
+        F.countDistinct("Zone").alias("zones"),
+    ).collect()[0]
+
+    print(f"\n✓ {row_count:,} rows written in {elapsed:.1f}s → {args.output}")
+    print(f"  Total revenue: ${stats['total_revenue']:,.2f}")
+    print(f"  Total trips:   {stats['total_trips']:,}")
+    print(f"  Boroughs: {stats['boroughs']}  |  Zones: {stats['zones']}")
+
+    print("\n── Top 3 Zones per Borough ──")
     report.filter(F.col("rank") <= 3).show(20, truncate=False)
 
     spark.stop()

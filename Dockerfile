@@ -45,7 +45,7 @@ COPY pyproject.toml uv.lock ./
 COPY src/ ./src/
 
 # Install dependencies (including distributed extras)
-RUN uv sync --frozen --extra distributed
+RUN uv sync --frozen --extra distributed --extra notebook
 
 # Make venv Python the default (must be AFTER uv sync creates it)
 ENV PATH="/app/.venv/bin:${PATH}"
