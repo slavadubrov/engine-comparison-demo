@@ -29,8 +29,9 @@ class ImageEmbedder:
     """GPU-bound: CLIP model loaded once, encode batches of images."""
 
     def __init__(self):
-        import torch
         import logging
+
+        import torch
 
         # Suppress verbose transformers logging
         logging.getLogger("transformers").setLevel(logging.ERROR)
@@ -49,34 +50,46 @@ class ImageEmbedder:
         self.processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
         self.model.eval()
 
-    @daft.method.batch(return_dtype=daft.DataType.python())
+    @daft.method.batch(
+        return_dtype=daft.DataType.fixed_size_list(daft.DataType.float32(), 512)
+    )
     def __call__(self, image_bytes_col):
         import io
 
+        import numpy as np
         import torch
         from PIL import Image
+
+        # Default embedding for failures (512-dim zero vector)
+        default_embedding = np.zeros(512, dtype=np.float32)
 
         embeddings = []
         for img_bytes in image_bytes_col.to_pylist():
             if img_bytes is None:
-                embeddings.append([0.0] * 512)  # CLIP base produces 512-dim embeddings
+                embeddings.append(default_embedding)
                 continue
             try:
                 img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
                 inputs = self.processor(images=img, return_tensors="pt").to(self.device)
                 with torch.no_grad():
                     features = self.model.get_image_features(**inputs)
-                emb = features[0].cpu().numpy().tolist()
-                embeddings.append(emb)
-            except Exception:
-                embeddings.append([0.0] * 512)
-        return embeddings
+                # Ensure we get exactly 512 float32 values
+                emb_array = features[0].cpu().numpy().astype(np.float32)
+                assert emb_array.shape == (512,), (
+                    f"Expected 512-dim embedding, got {emb_array.shape}"
+                )
+                embeddings.append(emb_array)
+            except Exception as e:
+                embeddings.append(default_embedding)
+
+        # Convert to 2D numpy array for Daft
+        return np.array(embeddings, dtype=np.float32)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", default="s3://bucket/image_metadata.parquet")
-    parser.add_argument("--output", default="s3://output/embeddings/")
+    parser.add_argument("--output", default="s3://bucket/embeddings/")
     args = parser.parse_args()
 
     t0 = time.perf_counter()

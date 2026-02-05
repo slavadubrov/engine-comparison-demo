@@ -8,7 +8,7 @@ from pathlib import Path
 # Image Processing
 # ---------------------------------------------------------------------------
 
-DEFAULT_N_IMAGES = 5000
+DEFAULT_N_IMAGES = 500
 """Default number of Food-101 images to download/benchmark."""
 
 TARGET_IMAGE_SIZE = (224, 224)

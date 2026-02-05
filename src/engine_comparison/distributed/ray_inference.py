@@ -66,11 +66,22 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", default="s3://bucket/images/")
     parser.add_argument("--output", default="s3://bucket/predictions/")
-    parser.add_argument("--gpu-workers", type=int, default=4)
-    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--gpu-workers", type=int, default=1)
+    parser.add_argument("--batch-size", type=int, default=32)
     args = parser.parse_args()
 
     ray.init()
+
+    # Auto-detect available GPUs
+    cluster_resources = ray.cluster_resources()
+    available_gpus = int(cluster_resources.get("GPU", 0))
+    if available_gpus == 0:
+        print("⚠️  No GPUs detected in Ray cluster. Running on CPU (slower).")
+    elif args.gpu_workers > available_gpus:
+        print(
+            f"⚠️  Requested {args.gpu_workers} GPU workers but only {available_gpus} available"
+        )
+        args.gpu_workers = max(1, available_gpus)
     t0 = time.perf_counter()
 
     ds = ray.data.read_images(args.input)

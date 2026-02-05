@@ -21,7 +21,7 @@ uv run python -m engine_comparison.data.loader
 # 4. Run the tabular benchmark (~2.9M NYC taxi trips)
 uv run python -m engine_comparison.benchmarks.tabular
 
-# 5. Run the multimodal benchmark (5000 real food photos)
+# 5. Run the multimodal benchmark (500 real food photos)
 uv run python -m engine_comparison.benchmarks.multimodal
 ```
 
@@ -50,7 +50,7 @@ borough and zone names (e.g., "Manhattan — Upper East Side North").
 |---|---|
 | Source | [ETH Zurich via Hugging Face](https://huggingface.co/datasets/ethz/food101) |
 | Format | JPEG images |
-| Default | 5000 images (configurable) |
+| Default | 500 images (configurable) |
 | Content | Real food photos — pizza, sushi, steak, etc. |
 
 Real photographs of food in 101 categories. Variable sizes and aspect ratios,
@@ -114,19 +114,64 @@ Run the distributed pipelines locally using Docker Compose with GPU support.
 
 - **Docker** 20.10+ with Compose v2
 - **NVIDIA Docker** (for GPU support) — [Installation Guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-- **~16 GB RAM** recommended for full stack
+- **~32 GB RAM** recommended (24 GB for Ray + 8 GB for app container)
+- **Single GPU** (RTX 4090, etc.) — config is optimized for single-GPU setups
 
-### Quick Start
+### Quick Start (Single GPU)
+
+For local development on a single GPU, start only the services needed for each pipeline:
 
 ```bash
 # 1. Build all images
 docker compose build
+```
 
-# 2. Start the distributed stack
-docker compose up -d
+**For Daft/Ray pipelines:**
+```bash
+# Start minimal stack (MinIO + Ray + App container)
+docker compose up -d minio minio-setup ray-head app
 
-# 3. Check services
-docker compose ps
+# Upload sample data
+./scripts/upload-data.sh
+
+# Run Daft pipeline
+./scripts/docker-run-daft.sh --input s3://bucket/image_metadata.parquet --output s3://bucket/embeddings/
+
+# Run Ray inference
+./scripts/docker-run-ray.sh --input s3://bucket/images/ --output s3://bucket/predictions/
+```
+
+**For Spark pipelines:**
+```bash
+# Start Spark stack (MinIO + Spark)
+docker compose up -d minio minio-setup spark-master
+docker compose up -d --scale spark-worker=1 spark-worker app
+
+# Run Spark ETL
+./scripts/docker-run-spark.sh --orders "s3a://lake/taxi/*.parquet" --output s3a://warehouse/report
+```
+
+> **Important:** Don't run `docker compose up -d` without specifying services — this starts ALL containers and causes GPU memory contention.
+
+### Resource Configuration (Single GPU)
+
+The docker-compose.yml is optimized for single-GPU setups:
+
+| Service | GPU | Memory | Default State |
+|---------|-----|--------|---------------|
+| ray-head | 1 GPU | 24 GB | Enabled |
+| ray-worker | — | — | Disabled (replicas=0) |
+| spark-worker | 1 GPU | 10 GB | Disabled (replicas=0) |
+| app | — | 8 GB | Enabled (Ray client) |
+
+**To scale Spark workers:**
+```bash
+docker compose up -d --scale spark-worker=1 spark-worker
+```
+
+**To stop GPU-heavy services:**
+```bash
+docker compose stop ray-head spark-worker
 ```
 
 ### Web UIs
@@ -137,34 +182,27 @@ docker compose ps
 | Spark UI | http://localhost:8080 | Spark master dashboard |
 | Ray Dashboard | http://localhost:8265 | Ray cluster status |
 
-### Running Pipelines
-
-First, upload the sample datasets to MinIO, then run the pipelines:
-
-```bash
-# Step 1: Upload datasets to MinIO (required before running pipelines)
-./scripts/upload-data.sh
-
-# Step 2: Run pipelines
-# Spark ETL (NYC Taxi)
-./scripts/docker-run-spark.sh --orders "s3a://lake/taxi/*.parquet" --output s3a://warehouse/report
-
-# Ray inference (GPU image classification)
-./scripts/docker-run-ray.sh --input s3://bucket/images/ --output s3://bucket/predictions/
-
-# Daft pipeline (document embedding)
-./scripts/docker-run-daft.sh --input s3://lake/pdfs.parquet --output s3://output/embeddings/
-```
-
-> **Note:** The upload script uploads both Food-101 images and NYC Taxi data to MinIO.
-> This may take a few minutes for the 5000 images.
-
 ### Stopping
 
 ```bash
 docker compose down          # Stop services
 docker compose down -v       # Stop and remove volumes (clears MinIO data)
 ```
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| System freeze / unresponsive | Too many GPU containers. Stop all: `docker compose down`, then start only needed services |
+| `FileNotFoundError` or missing data | Run `./scripts/upload-data.sh` first |
+| GPU out of memory | Stop other GPU containers: `docker compose stop spark-worker` |
+| Ray "No healthy driver" error | Ensure ray-head is running: `docker compose up -d ray-head` |
+| Slow performance | Run one pipeline at a time; don't mix Spark + Ray simultaneously |
+| Daft "bucket not found" error | Ensure MinIO setup completed (`docker compose logs minio-setup`) |
+
+### Documentation
+
+For architecture diagrams and detailed explanations, see [docs/architecture.md](docs/architecture.md).
 
 ---
 

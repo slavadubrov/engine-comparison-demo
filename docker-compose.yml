@@ -34,6 +34,7 @@ services:
       mc mb local/lake --ignore-existing;
       mc mb local/warehouse --ignore-existing;
       mc mb local/bucket --ignore-existing;
+      mc mb local/output --ignore-existing;
       echo 'Buckets created successfully';
       "
 
@@ -68,12 +69,14 @@ services:
   spark-worker:
     build: .
     deploy:
-      replicas: 2
+      replicas: 0  # Disabled by default — start with: docker compose up -d --scale spark-worker=1
       resources:
+        limits:
+          memory: 10g
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              count: 1
               capabilities: [gpu]
     environment:
       - SPARK_MODE=worker
@@ -102,13 +105,16 @@ services:
     container_name: ray-head
     deploy:
       resources:
+        limits:
+          memory: 24g
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              count: 1
               capabilities: [gpu]
     environment:
       - RAY_HEAD_NODE=1
+      - RAY_OBJECT_STORE_MEMORY=4000000000
       - AWS_ENDPOINT_URL=http://minio:9000
       - AWS_ACCESS_KEY_ID=minioadmin
       - AWS_SECRET_ACCESS_KEY=minioadmin
@@ -116,7 +122,16 @@ services:
       - "8265:8265"   # Ray Dashboard
       - "6379:6379"   # Ray GCS
       - "10001:10001" # Ray Client
-    command: ["ray", "start", "--head", "--dashboard-host=0.0.0.0", "--port=6379", "--dashboard-port=8265", "--ray-client-server-port=10001", "--block"]
+    command: >
+      ray start --head
+      --dashboard-host=0.0.0.0
+      --port=6379
+      --dashboard-port=8265
+      --ray-client-server-port=10001
+      --object-store-memory=4000000000
+      --num-cpus=8
+      --num-gpus=1
+      --block
     volumes:
       - ./src:/app/src:ro
     depends_on:
@@ -125,12 +140,12 @@ services:
   ray-worker:
     build: .
     deploy:
-      replicas: 1
+      replicas: 0  # Disabled by default — single-node Ray doesn't need separate worker
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              count: 1
               capabilities: [gpu]
     environment:
       - RAY_ADDRESS=ray-head:6379
@@ -151,11 +166,9 @@ services:
     container_name: engine-comparison-app
     deploy:
       resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+        limits:
+          memory: 8g
+        # No GPU reservation — uses Ray remotely via RAY_ADDRESS
     environment:
       - SPARK_MASTER=spark://spark-master:7077
       - RAY_ADDRESS=ray://ray-head:10001
