@@ -25,6 +25,7 @@ Usage:
 
 from __future__ import annotations
 
+import atexit
 import csv
 import gc
 import os
@@ -34,6 +35,17 @@ from pathlib import Path
 # Disable HF Hub's telemetry to prevent background threads
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
+
+# Force cleanup before exit to prevent GIL errors
+def _cleanup():
+    """Force cleanup of all resources before Python shutdown."""
+    import gc
+
+    gc.collect()
+
+
+atexit.register(_cleanup)
 
 import pyarrow.parquet as pq
 from datasets import load_dataset
@@ -199,11 +211,17 @@ def main():
 
     trips_path, zones_path = load_nyc_taxi()
 
-    # Show row count
-    meta = pq.read_metadata(str(trips_path))
-    console.print(
-        f"  → Taxi trips: [green]{meta.num_rows:,}[/] rows × {meta.num_columns} cols"
-    )
+    # Show row count - explicitly close PyArrow file after reading
+    parquet_file = pq.ParquetFile(str(trips_path))
+    try:
+        meta = parquet_file.metadata
+        console.print(
+            f"  → Taxi trips: [green]{meta.num_rows:,}[/] rows × {meta.num_columns} cols"
+        )
+    finally:
+        # Explicitly close the ParquetFile to release resources
+        parquet_file.close()
+        del parquet_file
 
     with open(zones_path) as f:
         n_zones = sum(1 for _ in csv.reader(f)) - 1
@@ -216,6 +234,14 @@ def main():
     console.print("[bold green]✓ All data ready! Run the benchmarks:[/]")
     console.print("  uv run python -m engine_comparison.benchmarks.tabular")
     console.print("  uv run python -m engine_comparison.benchmarks.multimodal\n")
+
+    # Force cleanup before exit to prevent GIL threading errors
+    gc.collect()
+
+    # Give background threads time to finish
+    import time
+
+    time.sleep(0.1)
 
 
 if __name__ == "__main__":

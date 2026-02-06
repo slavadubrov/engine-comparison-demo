@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Project
+.data/
+benchmarks/
+.ruff_cache/
+*.egg-info/
+
+# Docker
+Dockerfile*
+docker-compose*.yml

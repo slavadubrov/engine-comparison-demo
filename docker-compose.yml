@@ -1,0 +1,199 @@
+# Engine Comparison Demo - Distributed Computing Stack
+# GPU-enabled services for Spark, Ray, and Daft pipelines
+
+services:
+  # =========================================================================
+  # S3-Compatible Storage (MinIO)
+  # =========================================================================
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web Console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+      - ./.data:/hostdata:ro
+
+  # Create default buckets on startup
+  minio-setup:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Waiting for MinIO to start...';
+      until mc alias set local http://minio:9000 minioadmin minioadmin 2>/dev/null; do
+        echo 'MinIO not ready, retrying in 2 seconds...';
+        sleep 2;
+      done;
+      mc mb local/lake --ignore-existing;
+      mc mb local/warehouse --ignore-existing;
+      mc mb local/bucket --ignore-existing;
+      mc mb local/output --ignore-existing;
+      echo 'Buckets created successfully';
+      "
+
+  # =========================================================================
+  # Apache Spark Cluster
+  # =========================================================================
+  spark-master:
+    build: .
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8080
+      - AWS_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+    ports:
+      - "8080:8080"   # Spark Web UI
+      - "7077:7077"   # Spark Master
+    command: >
+      bash -c "
+      start-master.sh &&
+      tail -f /opt/spark/logs/*
+      "
+    volumes:
+      - ./src:/app/src:ro
+      - spark-logs:/opt/spark/logs
+    depends_on:
+      - minio
+
+  spark-worker:
+    build: .
+    deploy:
+      replicas: 0  # Disabled by default — start with: docker compose up -d --scale spark-worker=1
+      resources:
+        limits:
+          memory: 10g
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_CORES=4
+      - SPARK_WORKER_MEMORY=8g
+      - AWS_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+    command: >
+      bash -c "
+      start-worker.sh spark://spark-master:7077 &&
+      tail -f /opt/spark/logs/*
+      "
+    volumes:
+      - ./src:/app/src:ro
+      - spark-logs:/opt/spark/logs
+    depends_on:
+      - spark-master
+
+  # =========================================================================
+  # Ray Cluster
+  # =========================================================================
+  ray-head:
+    build: .
+    container_name: ray-head
+    deploy:
+      resources:
+        limits:
+          memory: 24g
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - RAY_HEAD_NODE=1
+      - RAY_OBJECT_STORE_MEMORY=4000000000
+      - AWS_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+    ports:
+      - "8265:8265"   # Ray Dashboard
+      - "6379:6379"   # Ray GCS
+      - "10001:10001" # Ray Client
+    command: >
+      ray start --head
+      --dashboard-host=0.0.0.0
+      --port=6379
+      --dashboard-port=8265
+      --ray-client-server-port=10001
+      --object-store-memory=4000000000
+      --num-cpus=8
+      --num-gpus=1
+      --block
+    volumes:
+      - ./src:/app/src:ro
+    depends_on:
+      - minio
+
+  ray-worker:
+    build: .
+    deploy:
+      replicas: 0  # Disabled by default — single-node Ray doesn't need separate worker
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - RAY_ADDRESS=ray-head:6379
+      - AWS_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+    command: ["ray", "start", "--address=ray-head:6379", "--block"]
+    volumes:
+      - ./src:/app/src:ro
+    depends_on:
+      - ray-head
+
+  # =========================================================================
+  # App Container (for running pipelines interactively)
+  # =========================================================================
+  app:
+    build: .
+    container_name: engine-comparison-app
+    deploy:
+      resources:
+        limits:
+          memory: 8g
+        # No GPU reservation — uses Ray remotely via RAY_ADDRESS
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - RAY_ADDRESS=ray://ray-head:10001
+      - DAFT_RUNNER=ray
+      - AWS_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+    ports:
+      - "8888:8888"   # Jupyter Lab
+    volumes:
+      - ./src:/app/src
+      - ./.data:/app/.data
+      - ./benchmarks:/app/benchmarks
+      - ./notebook:/app/notebook
+    depends_on:
+      - spark-master
+      - ray-head
+      - minio
+    stdin_open: true
+    tty: true
+
+volumes:
+  minio-data:
+  spark-logs:
+
+networks:
+  default:
+    name: engine-comparison

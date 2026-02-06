@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500">
+  <defs>
+    <linearGradient id="minioGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#C72C48;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8B1E3F;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="sparkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#E25A1C;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#F09819;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="rayGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00A1E4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0062B1;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="daftGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7B68EE;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#4B0082;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Title -->
+  <text x="400" y="35" text-anchor="middle" font-family="system-ui, sans-serif" font-size="20" font-weight="bold" fill="#333">Docker Network Topology</text>
+  <text x="400" y="55" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#666">engine-comparison network</text>
+
+  <!-- MinIO (Center) -->
+  <g transform="translate(350, 200)">
+    <rect x="0" y="0" width="100" height="80" rx="8" fill="url(#minioGrad)" filter="url(#shadow)"/>
+    <text x="50" y="35" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="bold" fill="white">MinIO</text>
+    <text x="50" y="52" text-anchor="middle" font-family="monospace" font-size="10" fill="white">:9000 S3</text>
+    <text x="50" y="66" text-anchor="middle" font-family="monospace" font-size="10" fill="white">:9001 Console</text>
+  </g>
+
+  <!-- Spark Cluster (Left) -->
+  <g transform="translate(80, 130)">
+    <rect x="0" y="0" width="140" height="140" rx="10" fill="none" stroke="#E25A1C" stroke-width="2" stroke-dasharray="5,5"/>
+    <text x="70" y="20" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#E25A1C">Spark Cluster</text>
+
+    <rect x="20" y="30" width="100" height="45" rx="6" fill="url(#sparkGrad)" filter="url(#shadow)"/>
+    <text x="70" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="bold" fill="white">spark-master</text>
+    <text x="70" y="65" text-anchor="middle" font-family="monospace" font-size="9" fill="white">:8080 :7077</text>
+
+    <rect x="10" y="85" width="55" height="40" rx="5" fill="url(#sparkGrad)" filter="url(#shadow)"/>
+    <text x="37" y="103" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" font-weight="bold" fill="white">worker</text>
+    <text x="37" y="115" text-anchor="middle" font-family="monospace" font-size="8" fill="white">GPU</text>
+
+    <rect x="75" y="85" width="55" height="40" rx="5" fill="url(#sparkGrad)" filter="url(#shadow)"/>
+    <text x="102" y="103" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" font-weight="bold" fill="white">worker</text>
+    <text x="102" y="115" text-anchor="middle" font-family="monospace" font-size="8" fill="white">GPU</text>
+  </g>
+
+  <!-- Ray Cluster (Right) -->
+  <g transform="translate(580, 130)">
+    <rect x="0" y="0" width="140" height="140" rx="10" fill="none" stroke="#00A1E4" stroke-width="2" stroke-dasharray="5,5"/>
+    <text x="70" y="20" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#00A1E4">Ray Cluster</text>
+
+    <rect x="20" y="30" width="100" height="45" rx="6" fill="url(#rayGrad)" filter="url(#shadow)"/>
+    <text x="70" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="bold" fill="white">ray-head</text>
+    <text x="70" y="65" text-anchor="middle" font-family="monospace" font-size="9" fill="white">:8265 :6379</text>
+
+    <rect x="35" y="85" width="70" height="40" rx="5" fill="url(#rayGrad)" filter="url(#shadow)"/>
+    <text x="70" y="103" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" font-weight="bold" fill="white">ray-worker</text>
+    <text x="70" y="115" text-anchor="middle" font-family="monospace" font-size="8" fill="white">GPU</text>
+  </g>
+
+  <!-- App Container (Bottom) -->
+  <g transform="translate(325, 360)">
+    <rect x="0" y="0" width="150" height="60" rx="8" fill="url(#daftGrad)" filter="url(#shadow)"/>
+    <text x="75" y="25" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="bold" fill="white">app</text>
+    <text x="75" y="40" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="white">Pipeline Runner</text>
+    <text x="75" y="52" text-anchor="middle" font-family="monospace" font-size="8" fill="white">GPU + Daft/Ray/Spark</text>
+  </g>
+
+  <!-- Connection Lines -->
+  <!-- Spark to MinIO -->
+  <line x1="220" y1="200" x2="350" y2="230" stroke="#E25A1C" stroke-width="2" marker-end="url(#arrowOrange)"/>
+
+  <!-- Ray to MinIO -->
+  <line x1="580" y1="200" x2="450" y2="230" stroke="#00A1E4" stroke-width="2"/>
+
+  <!-- App to MinIO -->
+  <line x1="400" y1="360" x2="400" y2="280" stroke="#7B68EE" stroke-width="2"/>
+
+  <!-- App to Spark -->
+  <path d="M 325 390 Q 200 390 150 270" fill="none" stroke="#E25A1C" stroke-width="1.5" stroke-dasharray="4,2"/>
+
+  <!-- App to Ray -->
+  <path d="M 475 390 Q 600 390 650 270" fill="none" stroke="#00A1E4" stroke-width="1.5" stroke-dasharray="4,2"/>
+
+  <!-- Legend -->
+  <g transform="translate(30, 420)">
+    <text x="0" y="0" font-family="system-ui, sans-serif" font-size="11" font-weight="bold" fill="#333">Ports:</text>
+    <text x="0" y="18" font-family="monospace" font-size="10" fill="#666">9000 - MinIO S3 API</text>
+    <text x="0" y="33" font-family="monospace" font-size="10" fill="#666">9001 - MinIO Console</text>
+    <text x="150" y="18" font-family="monospace" font-size="10" fill="#666">8080 - Spark UI</text>
+    <text x="150" y="33" font-family="monospace" font-size="10" fill="#666">7077 - Spark Master</text>
+    <text x="300" y="18" font-family="monospace" font-size="10" fill="#666">8265 - Ray Dashboard</text>
+    <text x="300" y="33" font-family="monospace" font-size="10" fill="#666">6379 - Ray GCS</text>
+  </g>
+
+  <!-- Buckets indicator -->
+  <g transform="translate(550, 420)">
+    <text x="0" y="0" font-family="system-ui, sans-serif" font-size="11" font-weight="bold" fill="#333">S3 Buckets:</text>
+    <text x="0" y="18" font-family="monospace" font-size="10" fill="#666">lake, warehouse, bucket, output</text>
+  </g>
+</svg>

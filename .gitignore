@@ -72,3 +72,7 @@ dmypy.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Rust / Cargo
+rust_benchmark/target/
+rust_benchmark/Cargo.lock

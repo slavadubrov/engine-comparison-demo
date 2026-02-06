@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import argparse
 import gc
+import json
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import daft
@@ -34,6 +36,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import polars as pl
+import pyarrow.csv as pcsv
 import pyarrow.parquet as pq
 from daft import col
 from datafusion import SessionContext
@@ -47,6 +50,7 @@ from engine_comparison.constants import (
     DEFAULT_TAXI_MONTH,
     DEFAULT_TAXI_YEAR,
     TABULAR_CHART_OUTPUT,
+    TABULAR_JSON_OUTPUT,
 )
 from engine_comparison.data.loader import load_nyc_taxi
 
@@ -144,43 +148,33 @@ def bench_polars(trips_path: str, zones_path: str, n_runs: int) -> dict:
     # Read
     results["Read Parquet"] = timeit(lambda: pl.read_parquet(trips_path), n_runs)
 
-    # Filter (lazy — predicate pushdown into Parquet reader)
+    # Preload data for fair in-memory comparison
+    df = pl.read_parquet(trips_path)
+    zones = pl.read_csv(zones_path)
+
+    # Filter (in-memory)
     results["Filter"] = timeit(
-        lambda: (
-            pl.scan_parquet(trips_path)
-            .filter((pl.col("trip_distance") > 5.0) & (pl.col("fare_amount") > 30.0))
-            .collect()
+        lambda: df.filter(
+            (pl.col("trip_distance") > 5.0) & (pl.col("fare_amount") > 30.0)
         ),
         n_runs,
     )
 
-    # GroupBy + Agg (lazy)
+    # GroupBy + Agg (in-memory)
     results["GroupBy + Agg"] = timeit(
-        lambda: (
-            pl.scan_parquet(trips_path)
-            .group_by("payment_type")
-            .agg(
-                pl.len().alias("trip_count"),
-                pl.col("total_amount").sum().alias("total_revenue"),
-                pl.col("fare_amount").mean().alias("avg_fare"),
-                pl.col("tip_amount").mean().alias("avg_tip"),
-            )
-            .collect()
+        lambda: df.group_by("payment_type").agg(
+            pl.len().alias("trip_count"),
+            pl.col("total_amount").sum().alias("total_revenue"),
+            pl.col("fare_amount").mean().alias("avg_fare"),
+            pl.col("tip_amount").mean().alias("avg_tip"),
         ),
         n_runs,
     )
 
-    # Join (lazy scan both sides)
+    # Join (in-memory)
     results["Join"] = timeit(
-        lambda: (
-            pl.scan_parquet(trips_path)
-            .join(
-                pl.scan_csv(zones_path),
-                left_on="PULocationID",
-                right_on="LocationID",
-                how="inner",
-            )
-            .collect()
+        lambda: df.join(
+            zones, left_on="PULocationID", right_on="LocationID", how="inner"
         ),
         n_runs,
     )
@@ -228,10 +222,15 @@ def bench_datafusion(trips_path: str, zones_path: str, n_runs: int) -> dict:
 
     results["Read Parquet"] = timeit(df_read, n_runs)
 
-    # Filter
+    # Preload data for fair in-memory comparison
+    ctx = SessionContext()
+    trips_table = pq.read_table(trips_path)
+    zones_table = pcsv.read_csv(zones_path)
+    ctx.register_record_batches("trips", [trips_table.to_batches()])
+    ctx.register_record_batches("zones", [zones_table.to_batches()])
+
+    # Filter (in-memory)
     def df_filter():
-        ctx = SessionContext()
-        ctx.register_parquet("trips", trips_path)
         ctx.sql("""
             SELECT *
             FROM trips
@@ -240,10 +239,8 @@ def bench_datafusion(trips_path: str, zones_path: str, n_runs: int) -> dict:
 
     results["Filter"] = timeit(df_filter, n_runs)
 
-    # GroupBy + Agg
+    # GroupBy + Agg (in-memory)
     def df_groupby():
-        ctx = SessionContext()
-        ctx.register_parquet("trips", trips_path)
         ctx.sql("""
             SELECT payment_type,
                    COUNT(*)            AS trip_count,
@@ -256,11 +253,8 @@ def bench_datafusion(trips_path: str, zones_path: str, n_runs: int) -> dict:
 
     results["GroupBy + Agg"] = timeit(df_groupby, n_runs)
 
-    # Join
+    # Join (in-memory)
     def df_join():
-        ctx = SessionContext()
-        ctx.register_parquet("trips", trips_path)
-        ctx.register_csv("zones", zones_path)
         ctx.sql("""
             SELECT t.*, z."Borough", z."Zone"
             FROM trips t
@@ -305,22 +299,24 @@ def bench_daft(trips_path: str, zones_path: str, n_runs: int) -> dict:
         lambda: daft.read_parquet(trips_path).collect(), n_runs
     )
 
-    # Filter
+    # Preload data for fair in-memory comparison
+    df = daft.read_parquet(trips_path).collect()
+    zones = daft.read_csv(zones_path).collect()
+
+    # Filter (in-memory)
     results["Filter"] = timeit(
         lambda: (
-            daft.read_parquet(trips_path)
-            .where(col("trip_distance") > 5.0)
+            df.where(col("trip_distance") > 5.0)
             .where(col("fare_amount") > 30.0)
             .collect()
         ),
         n_runs,
     )
 
-    # GroupBy + Agg
+    # GroupBy + Agg (in-memory)
     results["GroupBy + Agg"] = timeit(
         lambda: (
-            daft.read_parquet(trips_path)
-            .groupby("payment_type")
+            df.groupby("payment_type")
             .agg(
                 col("total_amount").sum().alias("total_revenue"),
                 col("fare_amount").mean().alias("avg_fare"),
@@ -332,17 +328,9 @@ def bench_daft(trips_path: str, zones_path: str, n_runs: int) -> dict:
         n_runs,
     )
 
-    # Join
+    # Join (in-memory)
     results["Join"] = timeit(
-        lambda: (
-            daft.read_parquet(trips_path)
-            .join(
-                daft.read_csv(zones_path),
-                left_on="PULocationID",
-                right_on="LocationID",
-            )
-            .collect()
-        ),
+        lambda: df.join(zones, left_on="PULocationID", right_on="LocationID").collect(),
         n_runs,
     )
 
@@ -494,6 +482,24 @@ def save_chart(
     plt.close(fig)
 
 
+def save_json_report(
+    all_results: dict[str, dict],
+    dataset_info: dict,
+    output_path: str = TABULAR_JSON_OUTPUT,
+) -> None:
+    """Save benchmark results as JSON for aggregation with Rust benchmarks."""
+    report = {
+        "benchmark": "tabular",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "dataset": dataset_info,
+        "results": all_results,
+    }
+    BENCHMARKS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(report, f, indent=2)
+    console.print(f"[bold green]JSON report saved → {output_path}[/]\n")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -531,6 +537,15 @@ def main():
     # Dataset info
     meta = pq.read_metadata(trips_str)
     size_mb = trips_path.stat().st_size / (1024 * 1024)
+
+    dataset_info = {
+        "name": "NYC Yellow Taxi",
+        "year": args.year,
+        "month": args.month,
+        "rows": meta.num_rows,
+        "columns": meta.num_columns,
+        "size_mb": round(size_mb, 1),
+    }
 
     console.print(
         Panel(
@@ -572,6 +587,7 @@ def main():
     # --- Results ---
     render_table(all_results)
     save_chart(all_results)
+    save_json_report(all_results, dataset_info)
 
 
 if __name__ == "__main__":
