@@ -226,17 +226,23 @@ Three Jupyter notebooks let you explore distributed engines interactively:
 #### Quick Start (Docker)
 
 ```bash
-# 1. Start services (Ray+Daft example — swap ray-head for spark-master for Spark)
-docker compose up -d minio minio-setup ray-head app
+# 1. Build images (includes Hadoop AWS + AWS SDK v2 for S3A support)
+docker compose build
 
-# 2. Upload sample data
+# 2. Start services (example for PySpark — use ray-head for Ray/Daft)
+docker compose up -d minio minio-setup spark-master
+docker compose up -d --scale spark-worker=1 spark-worker app
+
+# 3. Upload sample data to MinIO
 ./scripts/upload-data.sh
 
-# 3. Launch Jupyter Lab
+# 4. Launch Jupyter Lab
 docker compose exec app jupyter lab --ip 0.0.0.0 --port 8888 --allow-root --no-browser --notebook-dir=/app/notebook
 ```
 
 Open <http://localhost:8888> and select a notebook. Each notebook includes setup instructions for its specific services.
+
+> **Note:** The first `docker compose build` downloads Hadoop AWS (3.4.0) and AWS SDK v2 JARs required for Spark S3A connectivity to MinIO. This is a one-time step.
 
 ---
 
@@ -250,6 +256,25 @@ Run the distributed pipelines locally using Docker Compose with GPU support.
 - **NVIDIA Docker** (for GPU support) — [Installation Guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
 - **~32 GB RAM** recommended (24 GB for Ray + 8 GB for app container)
 - **Single GPU** (RTX 4090, etc.) — config is optimized for single-GPU setups
+
+### S3A Connectivity (Spark + MinIO)
+
+Spark 4.1.1 requires **Hadoop 3.4.0** with **AWS SDK v2** for S3A filesystem support. The Dockerfile automatically downloads:
+
+- `hadoop-aws-3.4.0.jar` — S3A filesystem implementation
+- `bundle-2.20.160.jar` — AWS SDK v2 (required by Hadoop 3.4.x)
+
+These JARs enable Spark to read from MinIO using `s3a://` URIs. The configuration is pre-set in docker-compose.yml:
+
+```yaml
+environment:
+  - SPARK_MASTER=spark://spark-master:7077
+  - AWS_ENDPOINT_URL=http://minio:9000
+  - AWS_ACCESS_KEY_ID=minioadmin
+  - AWS_SECRET_ACCESS_KEY=minioadmin
+```
+
+No additional configuration is needed — just run `docker compose build` once.
 
 ### Quick Start (Single GPU)
 
@@ -337,6 +362,9 @@ docker compose down -v       # Stop and remove volumes (clears MinIO data)
 | Ray "No healthy driver" error | Ensure ray-head is running: `docker compose up -d ray-head` |
 | Slow performance | Run one pipeline at a time; don't mix Spark + Ray simultaneously |
 | Daft "bucket not found" error | Ensure MinIO setup completed (`docker compose logs minio-setup`) |
+| Spark S3A `ClassNotFoundException` | Rebuild images: `docker compose build` (downloads Hadoop AWS JARs) |
+| Spark S3A `NumberFormatException: "60s"` | Hadoop version mismatch. Dockerfile uses Hadoop 3.4.0 matching Spark 4.1.1 |
+| Spark S3A `AwsCredentialsProvider` error | AWS SDK v2 required. Dockerfile includes `bundle-2.20.160.jar` |
 
 ---
 

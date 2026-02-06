@@ -35,13 +35,14 @@ RUN curl -fsSL https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spar
     && mv /opt/spark-${SPARK_VERSION}-bin-hadoop3 /opt/spark
 ENV PATH="${SPARK_HOME}/bin:${SPARK_HOME}/sbin:${PATH}"
 
-# Install Hadoop AWS and AWS SDK JARs for S3A support (required for MinIO)
-ENV HADOOP_VERSION=3.3.6
-ENV AWS_SDK_VERSION=1.12.753
+# Install Hadoop AWS and AWS SDK v2 JARs for S3A support (required for MinIO)
+# MUST match Spark 4.1.1's bundled Hadoop version (3.4.2)
+ENV HADOOP_VERSION=3.4.2
+ENV AWS_SDK_VERSION=2.25.16
 RUN curl -fsSL https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP_VERSION}/hadoop-aws-${HADOOP_VERSION}.jar \
     -o ${SPARK_HOME}/jars/hadoop-aws-${HADOOP_VERSION}.jar \
-    && curl -fsSL https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/${AWS_SDK_VERSION}/aws-java-sdk-bundle-${AWS_SDK_VERSION}.jar \
-    -o ${SPARK_HOME}/jars/aws-java-sdk-bundle-${AWS_SDK_VERSION}.jar
+    && curl -fsSL https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/${AWS_SDK_VERSION}/bundle-${AWS_SDK_VERSION}.jar \
+    -o ${SPARK_HOME}/jars/bundle-${AWS_SDK_VERSION}.jar
 
 # Install uv for fast package management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
