@@ -66,13 +66,22 @@ fn bench_tabular(trips_path: &str, zones_path: &str, n_runs: usize) -> HashMap<S
         ),
     );
 
-    // Filter: long-distance, high-fare trips
+    // Preload data for fair in-memory comparison
+    let df = LazyFrame::scan_parquet(trips_path, Default::default())
+        .unwrap()
+        .collect()
+        .unwrap();
+    let zones = LazyCsvReader::new(zones_path).finish().unwrap().collect().unwrap();
+
+    // Filter: long-distance, high-fare trips (in-memory)
+    let df_clone = df.clone();
     results.insert(
         "Filter".to_string(),
         timeit(
             || {
-                LazyFrame::scan_parquet(trips_path, Default::default())
-                    .unwrap()
+                df_clone
+                    .clone()
+                    .lazy()
                     .filter(
                         col("trip_distance")
                             .gt(lit(5.0))
@@ -85,13 +94,15 @@ fn bench_tabular(trips_path: &str, zones_path: &str, n_runs: usize) -> HashMap<S
         ),
     );
 
-    // GroupBy + Agg: revenue by payment type
+    // GroupBy + Agg: revenue by payment type (in-memory)
+    let df_clone = df.clone();
     results.insert(
         "GroupBy + Agg".to_string(),
         timeit(
             || {
-                LazyFrame::scan_parquet(trips_path, Default::default())
-                    .unwrap()
+                df_clone
+                    .clone()
+                    .lazy()
                     .group_by([col("payment_type")])
                     .agg([
                         col("VendorID").count().alias("trip_count"),
@@ -106,16 +117,18 @@ fn bench_tabular(trips_path: &str, zones_path: &str, n_runs: usize) -> HashMap<S
         ),
     );
 
-    // Join: enrich with pickup zone names
+    // Join: enrich with pickup zone names (in-memory)
+    let df_clone = df.clone();
+    let zones_clone = zones.clone();
     results.insert(
         "Join".to_string(),
         timeit(
             || {
-                let trips = LazyFrame::scan_parquet(trips_path, Default::default()).unwrap();
-                let zones = LazyCsvReader::new(zones_path).finish().unwrap();
-                trips
+                df_clone
+                    .clone()
+                    .lazy()
                     .join(
-                        zones,
+                        zones_clone.clone().lazy(),
                         [col("PULocationID")],
                         [col("LocationID")],
                         JoinArgs::new(JoinType::Inner),
@@ -127,7 +140,7 @@ fn bench_tabular(trips_path: &str, zones_path: &str, n_runs: usize) -> HashMap<S
         ),
     );
 
-    // ETL Pipeline: filter → join → groupby → sort → limit
+    // ETL Pipeline: filter → join → groupby → sort → limit (lazy from disk)
     results.insert(
         "ETL Pipeline".to_string(),
         timeit(
