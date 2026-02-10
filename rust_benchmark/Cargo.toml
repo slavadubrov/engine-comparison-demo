@@ -1,0 +1,13 @@
+[package]
+name = "rust_benchmark"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+polars = { version = "0.46", features = ["lazy", "parquet", "csv"] }
+image = "0.25"
+rayon = "1.10"
+glob = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }

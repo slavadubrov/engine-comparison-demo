@@ -20,9 +20,11 @@ dependencies = [
 [project.optional-dependencies]
 distributed = [
     "pyspark>=4.1.1",
-    "ray[data]>=2.53.0",
+    "ray[data, client]>=2.53.0",
     "torch>=2.10.0",
     "torchvision>=0.25.0",
+    "transformers>=5.0.0",
+    "s3fs>=2024.0.0",
 ]
 notebook = [
     "jupyterlab>=4.5.3",

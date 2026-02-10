@@ -66,11 +66,22 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", default="s3://bucket/images/")
     parser.add_argument("--output", default="s3://bucket/predictions/")
-    parser.add_argument("--gpu-workers", type=int, default=4)
-    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--gpu-workers", type=int, default=1)
+    parser.add_argument("--batch-size", type=int, default=32)
     args = parser.parse_args()
 
     ray.init()
+
+    # Auto-detect available GPUs
+    cluster_resources = ray.cluster_resources()
+    available_gpus = int(cluster_resources.get("GPU", 0))
+    if available_gpus == 0:
+        print("⚠️  No GPUs detected in Ray cluster. Running on CPU (slower).")
+    elif args.gpu_workers > available_gpus:
+        print(
+            f"⚠️  Requested {args.gpu_workers} GPU workers but only {available_gpus} available"
+        )
+        args.gpu_workers = max(1, available_gpus)
     t0 = time.perf_counter()
 
     ds = ray.data.read_images(args.input)
@@ -82,7 +93,31 @@ def main():
     )
     predictions.write_parquet(args.output)
 
-    print(f"\n✓ Complete in {time.perf_counter() - t0:.1f}s → {args.output}")
+    elapsed = time.perf_counter() - t0
+
+    # --- Result summary ---
+    results = ray.data.read_parquet(args.output)
+    total = results.count()
+    print(f"\n✓ Complete in {elapsed:.1f}s → {args.output}")
+    print(f"  Total predictions: {total:,}")
+
+    print("\n── Sample Predictions ──")
+    results.show(10)
+
+    # Class distribution (top-5)
+    import pandas as pd
+
+    sample = results.to_pandas()
+    class_counts = sample["prediction"].value_counts().head(5)
+    print("\n── Top-5 Predicted Classes ──")
+    for cls, count in class_counts.items():
+        print(f"  {cls}: {count}")
+
+    # Confidence stats
+    conf = sample["confidence"]
+    print(f"\n── Confidence Stats ──")
+    print(f"  avg={conf.mean():.4f}  min={conf.min():.4f}  max={conf.max():.4f}")
+
     ray.shutdown()
 
 
