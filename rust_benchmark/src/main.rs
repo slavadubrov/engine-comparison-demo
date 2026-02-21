@@ -7,6 +7,7 @@ use chrono::Utc;
 use glob::glob;
 use image::imageops::FilterType;
 use polars::prelude::*;
+use polars::prelude::ParallelStrategy;
 use rayon::prelude::*;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -57,20 +58,70 @@ fn bench_tabular(trips_path: &str, zones_path: &str, n_runs: usize) -> HashMap<S
         "Read Parquet".to_string(),
         timeit(
             || {
-                LazyFrame::scan_parquet(trips_path, Default::default())
-                    .unwrap()
-                    .collect()
-                    .unwrap()
+                let mut dfs = Vec::new();
+                for entry in glob(trips_path).expect("Failed to read glob pattern") {
+                    if let Ok(path) = entry {
+                        let df = LazyFrame::scan_parquet(path.to_str().unwrap(), Default::default())
+                            .unwrap()
+                            .with_column(
+                                col("tpep_pickup_datetime").cast(DataType::Datetime(TimeUnit::Microseconds, None))
+                            )
+                            .with_column(
+                                col("tpep_dropoff_datetime").cast(DataType::Datetime(TimeUnit::Microseconds, None))
+                            );
+                        dfs.push(df);
+                    }
+                }
+                concat(dfs, UnionArgs::default()).unwrap().collect().unwrap()
             },
             n_runs,
         ),
     );
 
     // Preload data for fair in-memory comparison
-    let df = LazyFrame::scan_parquet(trips_path, Default::default())
-        .unwrap()
-        .collect()
-        .unwrap();
+    let _args = ScanArgsParquet {
+        n_rows: None,
+        cache: true,
+        parallel: ParallelStrategy::Auto,
+        rechunk: false,
+        row_index: None,
+        low_memory: false,
+        cloud_options: None,
+        use_statistics: true,
+        schema: None,
+        ..Default::default()
+    };
+    
+    // Actually, Polars 'scan_parquet' on a glob will fail identically to Python
+    // if there's a schema mismatch depending on how it resolves the schema. 
+    // We can just set ignore_errors to true, or we can use `polars` dataset reading 
+    // but the easiest fix for Polars-rs when hitting schema mismatch across files 
+    // is to map the schema or read files individually and `concat`.
+    // Given the difficulty, the easiest is to read each file, cast the problematic
+    // datetime column to `Datetime(TimeUnit::Microseconds, None)`, and then vertically concat them.
+    
+    let mut dfs = Vec::new();
+    for entry in glob(trips_path).expect("Failed to read glob pattern") {
+        match entry {
+            Ok(path) => {
+                let file_path = path.to_str().unwrap();
+                let df = LazyFrame::scan_parquet(file_path, Default::default())
+                    .unwrap()
+                    .with_column(
+                        col("tpep_pickup_datetime").cast(DataType::Datetime(TimeUnit::Microseconds, None))
+                    )
+                    .with_column(
+                        col("tpep_dropoff_datetime").cast(DataType::Datetime(TimeUnit::Microseconds, None))
+                    )
+                    .collect()
+                    .unwrap();
+                dfs.push(df.lazy());
+            }
+            Err(e) => println!("{:?}", e),
+        }
+    }
+    
+    let df = concat(dfs, UnionArgs::default()).unwrap().collect().unwrap();
     let zones = LazyCsvReader::new(zones_path).finish().unwrap().collect().unwrap();
 
     // Filter: long-distance, high-fare trips (in-memory)
@@ -141,11 +192,29 @@ fn bench_tabular(trips_path: &str, zones_path: &str, n_runs: usize) -> HashMap<S
     );
 
     // ETL Pipeline: filter → join → groupby → sort → limit (lazy from disk)
+    // We already have `df` preloaded and concatenated which is easier for ETL since we had to cast 
+    // the datetimes. The original benchmark tested LazyFrame::scan_parquet here.
+    // We'll mimic this by using the lazy concat of the files.
     results.insert(
         "ETL Pipeline".to_string(),
         timeit(
             || {
-                let trips = LazyFrame::scan_parquet(trips_path, Default::default()).unwrap();
+                let mut dfs = Vec::new();
+                for entry in glob(trips_path).expect("Failed to read glob pattern") {
+                    if let Ok(path) = entry {
+                        let df = LazyFrame::scan_parquet(path.to_str().unwrap(), Default::default())
+                            .unwrap()
+                            .with_column(
+                                col("tpep_pickup_datetime").cast(DataType::Datetime(TimeUnit::Microseconds, None))
+                            )
+                            .with_column(
+                                col("tpep_dropoff_datetime").cast(DataType::Datetime(TimeUnit::Microseconds, None))
+                            );
+                        dfs.push(df);
+                    }
+                }
+                
+                let trips = concat(dfs, UnionArgs::default()).unwrap();
                 let zones = LazyCsvReader::new(zones_path).finish().unwrap();
                 trips
                     .filter(col("fare_amount").gt(lit(10.0)))
@@ -228,22 +297,27 @@ fn bench_multimodal(images_dir: &str, n_images: usize) -> HashMap<String, f64> {
 fn main() {
     let n_runs = 3;
 
-    // Paths (relative to project root)
-    let data_dir = ".data";
-    let benchmarks_dir = "benchmarks";
+    // Paths (relative to project root via run script, or run locally)
+    let data_dir = "../.data";
+    let benchmarks_dir = "../benchmarks";
 
     // Ensure output directory exists
     fs::create_dir_all(benchmarks_dir).unwrap();
 
     // --- Tabular Benchmark ---
     // Python saves to .data/nyc_taxi/ with year-month suffix
-    let trips_path = format!("{}/nyc_taxi/yellow_tripdata_2024-01.parquet", data_dir);
+    let trips_glob = format!("{}/nyc_taxi/yellow_tripdata_2024-*.parquet", data_dir);
     let zones_path = format!("{}/nyc_taxi/taxi_zone_lookup.csv", data_dir);
 
-    if Path::new(&trips_path).exists() && Path::new(&zones_path).exists() {
+    // Check if any matching files exist
+    let trips_exist = glob(&trips_glob)
+        .map(|mut paths| paths.next().is_some())
+        .unwrap_or(false);
+
+    if trips_exist && Path::new(&zones_path).exists() {
         println!("🦀 Running Polars-rs tabular benchmark...");
 
-        let tabular_results = bench_tabular(&trips_path, &zones_path, n_runs);
+        let tabular_results = bench_tabular(&trips_glob, &zones_path, n_runs);
 
         // Print results
         println!("\n  Polars-rs Results:");
@@ -252,11 +326,16 @@ fn main() {
         }
 
         // Get row count for dataset info
-        let df = LazyFrame::scan_parquet(&trips_path, Default::default())
-            .unwrap()
-            .collect()
-            .unwrap();
-        let rows = df.height();
+        let mut rows = 0;
+        for entry in glob(&trips_glob).unwrap() {
+            if let Ok(path) = entry {
+                let df = LazyFrame::scan_parquet(path.to_str().unwrap(), Default::default())
+                    .unwrap()
+                    .collect()
+                    .unwrap();
+                rows += df.height();
+            }
+        }
 
         // Save JSON report
         let mut results_map = HashMap::new();
@@ -279,7 +358,7 @@ fn main() {
     } else {
         println!(
             "⚠️  Tabular data not found at {}. Run Python benchmark first to download data.",
-            trips_path
+            trips_glob
         );
     }
 

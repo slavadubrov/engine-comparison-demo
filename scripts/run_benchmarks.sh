@@ -1,5 +1,5 @@
 #!/bin/bash
-# Engine Wars — Full Benchmark Pipeline
+# Engine Comparison — Full Benchmark Pipeline
 # ======================================
 # Runs Python benchmarks, Rust benchmarks, and aggregates results.
 #
@@ -10,7 +10,7 @@
 set -e
 
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║         🏁 Engine Wars — Full Benchmark Pipeline             ║"
+echo "║         🏁 Engine Comparison — Full Benchmark Pipeline             ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 

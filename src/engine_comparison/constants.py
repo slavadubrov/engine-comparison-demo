@@ -21,8 +21,8 @@ TARGET_IMAGE_SIZE = (224, 224)
 DEFAULT_TAXI_YEAR = 2024
 """Default year for NYC Taxi data."""
 
-DEFAULT_TAXI_MONTH = 1
-"""Default month for NYC Taxi data."""
+TAXI_MONTHS = list(range(1, 13))
+"""List of months (1-12) for NYC Taxi data (full year)."""
 
 TAXI_TRIPS_URL = (
     "https://d37ci6vzurychx.cloudfront.net/trip-data/"

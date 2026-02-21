@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Engine Wars — Ray Data: Distributed GPU Inference on Real Images
+Engine Comparison — Ray Data: Distributed GPU Inference on Real Images
 =================================================================
 Batch image classification using Ray Data's streaming actor pools.
 

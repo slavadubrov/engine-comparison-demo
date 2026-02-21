@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Engine Wars — Multimodal Image Benchmark (Food-101 Dataset)
+Engine Comparison — Multimodal Image Benchmark (Food-101 Dataset)
 =============================================================
 Downloads real food photos from ETH Zurich's Food-101 dataset, then
 benchmarks image preprocessing pipelines:
@@ -8,7 +8,7 @@ benchmarks image preprocessing pipelines:
   Pandas + Pillow  — sequential Python (GIL-bound, one image at a time)
   Daft (Rust)      — parallel native image ops (bypasses GIL entirely)
 
-This demonstrates the "Multimodal Shift" from the Engine Wars article:
+This demonstrates the "Multimodal Shift" from the Engine Comparison article:
 traditional DataFrame engines treat images as opaque blobs and delegate
 to sequential Python. Daft runs decode/resize/encode in parallel Rust
 threads, achieving dramatic speedups on multicore hardware.
@@ -171,7 +171,7 @@ OPERATIONS = ["Load Images", "Resize 224×224", "Total Pipeline"]
 
 def render_results(pandas_results: dict, daft_results: dict) -> None:
     table = Table(
-        title="🖼  Engine Wars — Food-101 Multimodal Benchmark",
+        title="🖼  Engine Comparison — Food-101 Multimodal Benchmark",
         show_lines=True,
         title_style="bold white on blue",
     )
@@ -299,7 +299,7 @@ def save_json_report(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Engine Wars — Food-101 Multimodal Benchmark"
+        description="Engine Comparison — Food-101 Multimodal Benchmark"
     )
     parser.add_argument(
         "--images",
@@ -330,7 +330,7 @@ def main():
 
     console.print(
         Panel(
-            f"[bold]Engine Wars — Multimodal Image Benchmark[/]\n\n"
+            f"[bold]Engine Comparison — Multimodal Image Benchmark[/]\n\n"
             f"  Dataset:   Food-101 (ETH Zurich / Hugging Face)\n"
             f"  Images:    [cyan]{n}[/] real food photos\n"
             f"  Samples:   {', '.join(sample_sizes[:3])} ...\n"

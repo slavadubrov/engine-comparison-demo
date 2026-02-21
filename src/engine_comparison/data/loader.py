@@ -62,8 +62,8 @@ from rich.progress import (
 from engine_comparison.constants import (
     DATA_DIR,
     DEFAULT_N_IMAGES,
-    DEFAULT_TAXI_MONTH,
     DEFAULT_TAXI_YEAR,
+    TAXI_MONTHS,
     TAXI_TRIPS_URL,
     TAXI_ZONES_URL,
 )
@@ -102,39 +102,48 @@ def _download(url: str, dest: Path, label: str = "Downloading") -> None:
 
 
 def load_nyc_taxi(
-    year: int = DEFAULT_TAXI_YEAR, month: int = DEFAULT_TAXI_MONTH
-) -> tuple[Path, Path]:
+    year: int = DEFAULT_TAXI_YEAR, months: list[int] | None = None
+) -> tuple[list[Path], Path]:
     """
-    Download NYC Yellow Taxi trip data (Parquet) and zone lookup (CSV).
+    Download NYC Yellow Taxi trip data (Parquet) for multiple months and zone lookup (CSV).
 
-    Returns (trips_parquet_path, zones_csv_path).
+    Returns (list_of_trips_parquet_paths, zones_csv_path).
     """
+    if months is None:
+        months = TAXI_MONTHS
+
     taxi_dir = DATA_DIR / "nyc_taxi"
     taxi_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Trip records ---
-    trips_path = taxi_dir / f"yellow_tripdata_{year}-{month:02d}.parquet"
-    if not trips_path.exists():
-        url = TAXI_TRIPS_URL.format(year=year, month=month)
-        console.print(
-            f"\n[bold cyan]Downloading NYC Yellow Taxi trips ({year}-{month:02d})...[/]"
-        )
-        _download(url, trips_path, f"yellow_tripdata_{year}-{month:02d}.parquet")
-        size_mb = trips_path.stat().st_size / (1024 * 1024)
-        console.print(f"  → Saved: [green]{size_mb:.1f} MB[/]")
-    else:
-        size_mb = trips_path.stat().st_size / (1024 * 1024)
-        console.print(f"  [dim]Cached: {trips_path.name} ({size_mb:.1f} MB)[/]")
+    trips_paths = []
+
+    # We will use a single progress bar for all month downloads if needed
+    for month in months:
+        trips_path = taxi_dir / f"yellow_tripdata_{year}-{month:02d}.parquet"
+        trips_paths.append(trips_path)
+
+        if not trips_path.exists():
+            url = TAXI_TRIPS_URL.format(year=year, month=month)
+            console.print(
+                f"\n[bold cyan]Downloading NYC Yellow Taxi trips ({year}-{month:02d})...[/]"
+            )
+            _download(url, trips_path, f"yellow_tripdata_{year}-{month:02d}.parquet")
+            size_mb = trips_path.stat().st_size / (1024 * 1024)
+            console.print(f"  → Saved: [green]{size_mb:.1f} MB[/]")
+        else:
+            size_mb = trips_path.stat().st_size / (1024 * 1024)
+            console.print(f"  [dim]Cached: {trips_path.name} ({size_mb:.1f} MB)[/]")
 
     # --- Zone lookup ---
     zones_path = taxi_dir / "taxi_zone_lookup.csv"
     if not zones_path.exists():
-        console.print("[bold cyan]Downloading taxi zone lookup...[/]")
+        console.print("\n[bold cyan]Downloading taxi zone lookup...[/]")
         _download(TAXI_ZONES_URL, zones_path, "taxi_zone_lookup.csv")
     else:
-        console.print(f"  [dim]Cached: {zones_path.name}[/]")
+        console.print(f"\n  [dim]Cached: {zones_path.name}[/]")
 
-    return trips_path, zones_path
+    return trips_paths, zones_path
 
 
 # ---------------------------------------------------------------------------
@@ -206,22 +215,29 @@ def load_food101_images(n_images: int = DEFAULT_N_IMAGES) -> Path:
 
 
 def main():
-    console.print("\n[bold white on blue] Engine Wars — Data Downloader [/]\n")
+    console.print("\n[bold white on blue] Engine Comparison — Data Downloader [/]\n")
     console.print("Downloading all benchmark datasets...\n")
 
-    trips_path, zones_path = load_nyc_taxi()
+    trips_paths, zones_path = load_nyc_taxi()
 
-    # Show row count - explicitly close PyArrow file after reading
-    parquet_file = pq.ParquetFile(str(trips_path))
-    try:
-        meta = parquet_file.metadata
-        console.print(
-            f"  → Taxi trips: [green]{meta.num_rows:,}[/] rows × {meta.num_columns} cols"
-        )
-    finally:
-        # Explicitly close the ParquetFile to release resources
-        parquet_file.close()
-        del parquet_file
+    # Show row count across all files
+    total_rows = 0
+    total_cols = 0
+    for trips_path in trips_paths:
+        parquet_file = pq.ParquetFile(str(trips_path))
+        try:
+            meta = parquet_file.metadata
+            total_rows += meta.num_rows
+            total_cols = meta.num_columns
+        finally:
+            # Explicitly close the ParquetFile to release resources
+            parquet_file.close()
+            del parquet_file
+
+    console.print(
+        f"  → Taxi trips: [green]{total_rows:,}[/] rows × {total_cols} cols "
+        f"({len(trips_paths)} files)"
+    )
 
     with open(zones_path) as f:
         n_zones = sum(1 for _ in csv.reader(f)) - 1

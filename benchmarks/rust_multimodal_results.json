@@ -1,6 +1,6 @@
 {
   "benchmark": "multimodal",
-  "timestamp": "2026-02-06T09:07:46.045351+00:00",
+  "timestamp": "2026-02-21T19:29:52.377431+00:00",
   "dataset": {
     "images": 500,
     "name": "Food-101",
@@ -11,9 +11,9 @@
   },
   "results": {
     "Rust image": {
-      "Load Images": 0.062408333,
-      "Resize 224×224": 0.208572292,
-      "Total Pipeline": 0.270980625
+      "Load Images": 0.072649875,
+      "Resize 224×224": 0.261183,
+      "Total Pipeline": 0.33383287500000003
     }
   }
 }

@@ -34,7 +34,7 @@ You can also spin up distributed services via Docker Compose to test cluster-sca
 
 ## Benchmark Results
 
-Combined results from Python engines and native Rust benchmarks on ~2.9M NYC taxi trips and 500 food images.
+Combined results from Python engines and native Rust benchmarks on ~41M NYC taxi trips and 500 food images.
 
 ### Tabular Benchmark (Python + Rust)
 
@@ -42,11 +42,11 @@ Combined results from Python engines and native Rust benchmarks on ~2.9M NYC tax
 
 | Operation | Pandas | Polars | DataFusion | Daft | Polars-rs (Rust) |
 |---|---|---|---|---|---|
-| Read Parquet | 0.07s | 0.07s | 0.08s | 0.08s | **0.04s** |
-| Filter | 0.02s | 0.01s | 0.02s | 0.02s | **0.01s** |
-| GroupBy + Agg | 0.07s | 0.01s | 0.01s | 0.01s | **0.01s** |
-| Join | 0.16s | 0.10s | 0.04s | 0.10s | **0.03s** |
-| ETL Pipeline | 0.18s | 0.05s | 0.04s | 0.08s | **0.05s** |
+| Read Parquet | 0.65s | 1.34s | 0.53s | 0.92s | **0.42s** |
+| Filter | 0.50s | 0.15s | 0.18s | 0.17s | **0.09s** |
+| GroupBy + Agg | 0.92s | **0.07s** | 0.08s | 0.08s | 0.19s |
+| Join | 2.08s | 1.94s | **1.21s** | 2.42s | 1.73s |
+| ETL Pipeline | 4.64s | 0.71s | **0.48s** | 1.10s | 0.57s |
 
 ### Multimodal Benchmark (Python + Rust)
 
@@ -54,9 +54,9 @@ Combined results from Python engines and native Rust benchmarks on ~2.9M NYC tax
 
 | Operation | Pandas + Pillow | Daft | Rust `image` | Speedup |
 |---|---|---|---|---|
-| Load Images | 0.40s | — | **0.06s** | 6.4× |
-| Resize 224×224 | 0.58s | — | **0.21s** | 2.8× |
-| Total Pipeline | 1.03s | 0.52s | **0.27s** | 3.8× |
+| Load Images | 0.40s | — | **0.07s** | 5.7× |
+| Resize 224×224 | 0.58s | — | **0.26s** | 2.2× |
+| Total Pipeline | 1.03s | **0.30s** | 0.33s | 3.1× |
 
 > Polars and DataFusion are excluded from multimodal because they lack native image operations — image work would still go through sequential Python.
 
@@ -74,14 +74,14 @@ uv sync
 # 3. Pre-download datasets (optional — benchmarks auto-download on first run)
 uv run python -m engine_comparison.data.loader
 
-# 4. Run the tabular benchmark (~2.9M NYC taxi trips)
+# 4. Run the tabular benchmark (~41M NYC taxi trips)
 uv run python -m engine_comparison.benchmarks.tabular
 
 # 5. Run the multimodal benchmark (500 real food photos)
 uv run python -m engine_comparison.benchmarks.multimodal
 ```
 
-First run downloads ~50 MB of data. Subsequent runs use the cache in `.data/`.
+First run downloads ~660 MB of data. Subsequent runs use the cache in `.data/`.
 
 ---
 
@@ -155,7 +155,7 @@ uv run python -m engine_comparison.benchmarks.multimodal --images 100
 |---|---|
 | Source | [NYC Taxi & Limousine Commission](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) |
 | Format | Apache Parquet |
-| Default | January 2024 (~2.9M rows × 19 columns, ~45 MB) |
+| Default | 2024 Full Year (~41M rows × 19 columns, ~660 MB) |
 | Join table | Taxi Zone Lookup (265 zones with borough names) |
 
 Real taxi trip records: pickup/dropoff times, locations, distances, fares,
@@ -182,7 +182,7 @@ exactly like production ML preprocessing pipelines encounter.
 
 | Operation | What it tests | Real-world analogy |
 |---|---|---|
-| Read Parquet | Full scan of ~45 MB file | Loading a dataset for analysis |
+| Read Parquet | Full scan of ~660 MB file | Loading a dataset for analysis |
 | Filter | `distance > 5mi AND fare > $30` | Finding high-value trips |
 | GroupBy + Agg | Revenue by payment type | Payment analytics dashboard |
 | Join | Trip data ⟕ Zone lookup | Enriching with borough names |
@@ -389,8 +389,8 @@ These require actual cluster infrastructure (Ray, Spark, or Daft Cloud).
 
 - **Python** 3.10 – 3.12
 - **uv** (recommended) or pip
-- **~2 GB free RAM** for the tabular benchmark
-- **Internet** on first run (downloads ~50 MB total, then cached)
+- **~8 GB free RAM** for the tabular benchmark
+- **Internet** on first run (downloads ~660 MB total, then cached)
 - Works on **macOS**, **Linux**, and **Windows**
 
 ---

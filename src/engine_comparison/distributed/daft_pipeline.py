@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Engine Wars — Daft: Distributed Image Embedding Pipeline
+Engine Comparison — Daft: Distributed Image Embedding Pipeline
 ==========================================================
 S3 Images → Download → GPU Embed (CLIP) → Parquet (streaming, Rust I/O)
 

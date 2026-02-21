@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Engine Wars — Results Aggregator
+Engine Comparison — Results Aggregator
 ================================
 Combines benchmark results from Python and Rust benchmarks,
 generating unified comparison charts.

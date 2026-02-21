@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Engine Wars — PySpark: Distributed Tabular ETL on NYC Taxi Data
+Engine Comparison — PySpark: Distributed Tabular ETL on NYC Taxi Data
 ================================================================
 Spark's strength: petabyte-scale joins with fault tolerance and AQE.
 

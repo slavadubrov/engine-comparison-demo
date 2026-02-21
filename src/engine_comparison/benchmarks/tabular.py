@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Engine Wars — Single-Node Tabular Benchmark (NYC Taxi Data)
+Engine Comparison — Single-Node Tabular Benchmark (NYC Taxi Data)
 ============================================================
 Downloads real NYC Yellow Taxi trip records (~2.9M rows) and benchmarks
 identical analytical queries across four engines:
@@ -16,7 +16,6 @@ Queries:
 
 Usage:
     uv run python -m engine_comparison.benchmarks.tabular
-    uv run python -m engine_comparison.benchmarks.tabular --year 2023 --month 6
     uv run python -m engine_comparison.benchmarks.tabular --runs 5
 """
 
@@ -24,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import glob
 import json
 import os
 import time
@@ -37,6 +37,7 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import pyarrow.csv as pcsv
+import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 from daft import col
 from datafusion import SessionContext
@@ -46,8 +47,8 @@ from rich.table import Table
 
 from engine_comparison.constants import (
     BENCHMARKS_OUTPUT_DIR,
+    DATA_DIR,
     DEFAULT_BENCHMARK_RUNS,
-    DEFAULT_TAXI_MONTH,
     DEFAULT_TAXI_YEAR,
     TABULAR_CHART_OUTPUT,
     TABULAR_JSON_OUTPUT,
@@ -82,13 +83,14 @@ def timeit(fn, n_runs: int = DEFAULT_BENCHMARK_RUNS) -> float:
 # ---------------------------------------------------------------------------
 
 
-def bench_pandas(trips_path: str, zones_path: str, n_runs: int) -> dict:
+def bench_pandas(trips_glob: str, zones_path: str, n_runs: int) -> dict:
     results = {}
 
+    trip_files = glob.glob(trips_glob)
     # Read
-    results["Read Parquet"] = timeit(lambda: pd.read_parquet(trips_path), n_runs)
+    results["Read Parquet"] = timeit(lambda: pd.read_parquet(trip_files), n_runs)
 
-    df = pd.read_parquet(trips_path)
+    df = pd.read_parquet(trip_files)
     zones = pd.read_csv(zones_path)
 
     # Filter: long-distance, high-fare trips
@@ -142,14 +144,30 @@ def bench_pandas(trips_path: str, zones_path: str, n_runs: int) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def bench_polars(trips_path: str, zones_path: str, n_runs: int) -> dict:
+def bench_polars(trips_glob: str, zones_path: str, n_runs: int) -> dict:
     results = {}
 
     # Read
-    results["Read Parquet"] = timeit(lambda: pl.read_parquet(trips_path), n_runs)
+    # Ignore schema metadata mismatch across different months' parquet files
+    # by using union_by_name=True or schema_overrides.
+    # The scan_parquet function doesn't easily natively ignore differences in
+    # temporal resolution like Parquet reading normally does in Pandas.
+    # But reading as a dataset in pyarrow and then converting to polars works smoothly.
+    # Or, faster: use union_by_name=True if it works, or just pyarrow.
+    # For now, let's cast explicitly by loading via PyArrow dataset (as datafusion does)
+    # OR overriding schema if we just use glob. But schema override might not work if physical type differs.
+
+    # Actually, simplest is to use PyArrow to handle the dataset reading and cast to polars
+    import pyarrow.dataset as ds
+
+    def read_pl():
+        table = ds.dataset(glob.glob(trips_glob)).to_table()
+        return pl.from_arrow(table)
+
+    results["Read Parquet"] = timeit(read_pl, n_runs)
 
     # Preload data for fair in-memory comparison
-    df = pl.read_parquet(trips_path)
+    df = read_pl()
     zones = pl.read_csv(zones_path)
 
     # Filter (in-memory)
@@ -180,9 +198,12 @@ def bench_polars(trips_path: str, zones_path: str, n_runs: int) -> dict:
     )
 
     # ETL Pipeline (fully lazy — single optimized query plan)
+    # Since scan_parquet fails on Schema mismatch, we will use LazyFrame from the arrow dataset
+    # OR we can just use `pl.scan_pyarrow_dataset()` which handles this gracefully!
+
     results["ETL Pipeline"] = timeit(
         lambda: (
-            pl.scan_parquet(trips_path)
+            pl.scan_pyarrow_dataset(ds.dataset(glob.glob(trips_glob)))
             .filter(pl.col("fare_amount") > 10.0)
             .join(
                 pl.scan_csv(zones_path),
@@ -211,20 +232,24 @@ def bench_polars(trips_path: str, zones_path: str, n_runs: int) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def bench_datafusion(trips_path: str, zones_path: str, n_runs: int) -> dict:
+def bench_datafusion(trips_glob: str, zones_path: str, n_runs: int) -> dict:
     results = {}
 
     # Read
     def df_read():
         ctx = SessionContext()
-        ctx.register_parquet("trips", trips_path)
+        ctx.register_parquet("trips", trips_glob)
         ctx.sql("SELECT * FROM trips").to_arrow_table()
 
     results["Read Parquet"] = timeit(df_read, n_runs)
 
     # Preload data for fair in-memory comparison
     ctx = SessionContext()
-    trips_table = pq.read_table(trips_path)
+
+    # Use pyarrow dataset to load all parquet files matching glob into a single table
+    trip_dataset = ds.dataset(glob.glob(trips_glob))
+    trips_table = trip_dataset.to_table()
+
     zones_table = pcsv.read_csv(zones_path)
     ctx.register_record_batches("trips", [trips_table.to_batches()])
     ctx.register_record_batches("zones", [zones_table.to_batches()])
@@ -266,7 +291,7 @@ def bench_datafusion(trips_path: str, zones_path: str, n_runs: int) -> dict:
     # ETL Pipeline (single SQL query — fully optimized)
     def df_etl():
         ctx = SessionContext()
-        ctx.register_parquet("trips", trips_path)
+        ctx.register_parquet("trips", trips_glob)
         ctx.register_csv("zones", zones_path)
         ctx.sql("""
             SELECT z."Borough",
@@ -291,16 +316,16 @@ def bench_datafusion(trips_path: str, zones_path: str, n_runs: int) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def bench_daft(trips_path: str, zones_path: str, n_runs: int) -> dict:
+def bench_daft(trips_glob: str, zones_path: str, n_runs: int) -> dict:
     results = {}
 
     # Read
     results["Read Parquet"] = timeit(
-        lambda: daft.read_parquet(trips_path).collect(), n_runs
+        lambda: daft.read_parquet(trips_glob).collect(), n_runs
     )
 
     # Preload data for fair in-memory comparison
-    df = daft.read_parquet(trips_path).collect()
+    df = daft.read_parquet(trips_glob).collect()
     zones = daft.read_csv(zones_path).collect()
 
     # Filter (in-memory)
@@ -337,7 +362,7 @@ def bench_daft(trips_path: str, zones_path: str, n_runs: int) -> dict:
     # ETL Pipeline
     results["ETL Pipeline"] = timeit(
         lambda: (
-            daft.read_parquet(trips_path)
+            daft.read_parquet(trips_glob)
             .where(col("fare_amount") > 10.0)
             .join(
                 daft.read_csv(zones_path),
@@ -377,7 +402,7 @@ ENGINE_COLORS = {
 def render_table(all_results: dict[str, dict]) -> None:
     """Print a Rich comparison table with speedup multipliers."""
     table = Table(
-        title="⚡ Engine Wars — NYC Taxi Benchmark Results",
+        title="⚡ Engine Comparison — NYC Taxi Benchmark Results",
         show_lines=True,
         title_style="bold white on blue",
         padding=(0, 1),
@@ -465,7 +490,7 @@ def save_chart(
     ax.set_xlabel("Operation", fontsize=12, fontweight="bold")
     ax.set_ylabel("Time (seconds, lower is better)", fontsize=12, fontweight="bold")
     ax.set_title(
-        "Engine Wars — NYC Yellow Taxi Benchmark (Single Node)",
+        "Engine Comparison — NYC Yellow Taxi Benchmark (Single Node)",
         fontsize=15,
         fontweight="bold",
     )
@@ -507,19 +532,13 @@ def save_json_report(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Engine Wars — NYC Taxi Tabular Benchmark"
+        description="Engine Comparison — NYC Taxi Tabular Benchmark"
     )
     parser.add_argument(
         "--year",
         type=int,
         default=DEFAULT_TAXI_YEAR,
         help=f"Taxi data year (default: {DEFAULT_TAXI_YEAR})",
-    )
-    parser.add_argument(
-        "--month",
-        type=int,
-        default=DEFAULT_TAXI_MONTH,
-        help=f"Taxi data month (default: {DEFAULT_TAXI_MONTH})",
     )
     parser.add_argument(
         "--runs",
@@ -530,30 +549,34 @@ def main():
     args = parser.parse_args()
 
     # Download / load data
-    trips_path, zones_path = load_nyc_taxi(args.year, args.month)
-    trips_str = str(trips_path)
+    _trips_paths, zones_path = load_nyc_taxi(args.year)
+    trips_glob = str(DATA_DIR / "nyc_taxi" / f"yellow_tripdata_{args.year}-*.parquet")
     zones_str = str(zones_path)
 
     # Dataset info
-    meta = pq.read_metadata(trips_str)
-    size_mb = trips_path.stat().st_size / (1024 * 1024)
+    trip_dataset = ds.dataset(glob.glob(trips_glob))
+    total_rows = sum(frag.count_rows() for frag in trip_dataset.get_fragments())
+    total_cols = len(trip_dataset.schema.names)
+
+    total_size_mb = sum(Path(f).stat().st_size for f in glob.glob(trips_glob)) / (
+        1024 * 1024
+    )
 
     dataset_info = {
         "name": "NYC Yellow Taxi",
         "year": args.year,
-        "month": args.month,
-        "rows": meta.num_rows,
-        "columns": meta.num_columns,
-        "size_mb": round(size_mb, 1),
+        "rows": total_rows,
+        "columns": total_cols,
+        "size_mb": round(total_size_mb, 1),
     }
 
     console.print(
         Panel(
-            f"[bold]Engine Wars — NYC Taxi Benchmark[/]\n\n"
-            f"  Dataset:  NYC Yellow Taxi, {args.year}-{args.month:02d}\n"
-            f"  Rows:     [cyan]{meta.num_rows:,}[/]\n"
-            f"  Columns:  [cyan]{meta.num_columns}[/]\n"
-            f"  Size:     [cyan]{size_mb:.1f} MB[/] (Parquet)\n"
+            f"[bold]Engine Comparison — NYC Taxi Benchmark[/]\n\n"
+            f"  Dataset:  NYC Yellow Taxi, full year {args.year} (12 months)\n"
+            f"  Rows:     [cyan]{total_rows:,}[/]\n"
+            f"  Columns:  [cyan]{total_cols}[/]\n"
+            f"  Size:     [cyan]{total_size_mb:.1f} MB[/] (Parquet)\n"
             f"  Runs:     [cyan]{args.runs}[/] per operation (median reported)\n"
             f"  Engines:  Pandas · Polars · DataFusion · Daft\n"
             f"  CPU:      [cyan]{os.cpu_count()}[/] cores",
@@ -566,22 +589,22 @@ def main():
 
     # --- Pandas ---
     console.print("[bold red]▸ Benchmarking Pandas...[/]")
-    all_results["Pandas"] = bench_pandas(trips_str, zones_str, args.runs)
+    all_results["Pandas"] = bench_pandas(trips_glob, zones_str, args.runs)
     console.print("  ✓ Pandas done\n")
 
     # --- Polars ---
     console.print("[bold blue]▸ Benchmarking Polars...[/]")
-    all_results["Polars"] = bench_polars(trips_str, zones_str, args.runs)
+    all_results["Polars"] = bench_polars(trips_glob, zones_str, args.runs)
     console.print("  ✓ Polars done\n")
 
     # --- DataFusion ---
     console.print("[bold magenta]▸ Benchmarking DataFusion...[/]")
-    all_results["DataFusion"] = bench_datafusion(trips_str, zones_str, args.runs)
+    all_results["DataFusion"] = bench_datafusion(trips_glob, zones_str, args.runs)
     console.print("  ✓ DataFusion done\n")
 
     # --- Daft ---
     console.print("[bold green]▸ Benchmarking Daft...[/]")
-    all_results["Daft"] = bench_daft(trips_str, zones_str, args.runs)
+    all_results["Daft"] = bench_daft(trips_glob, zones_str, args.runs)
     console.print("  ✓ Daft done\n")
 
     # --- Results ---
