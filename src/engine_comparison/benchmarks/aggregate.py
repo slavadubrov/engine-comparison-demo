@@ -37,7 +37,7 @@ matplotlib.use("Agg")
 # Tabular Aggregation
 # ---------------------------------------------------------------------------
 
-TABULAR_OPERATIONS = ["Read Parquet", "Filter", "GroupBy + Agg", "Join", "ETL Pipeline"]
+TABULAR_OPERATIONS = ["ETL Pipeline"]
 TABULAR_ENGINES = ["Pandas", "Polars", "DataFusion", "Daft", "Polars-rs"]
 TABULAR_COLORS = ["#e74c3c", "#3498db", "#9b59b6", "#2ecc71", "#f39c12"]
 
@@ -149,7 +149,7 @@ def save_tabular_chart(results: dict[str, dict]) -> None:
 # Multimodal Aggregation
 # ---------------------------------------------------------------------------
 
-MULTIMODAL_OPERATIONS = ["Load Images", "Resize 224×224", "Total Pipeline"]
+MULTIMODAL_OPERATIONS = ["Total Pipeline"]
 MULTIMODAL_ENGINES = ["Pandas + Pillow", "Daft", "Rust image"]
 MULTIMODAL_COLORS = ["#e74c3c", "#2ecc71", "#f39c12"]
 

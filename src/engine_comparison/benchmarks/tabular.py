@@ -8,11 +8,7 @@ identical analytical queries across four engines:
   Pandas · Polars · Apache DataFusion · Daft
 
 Queries:
-  1. Read Parquet      — full scan of ~45 MB trip data
-  2. Filter            — long-distance, high-fare trips (distance > 5mi, fare > $30)
-  3. GroupBy + Agg     — revenue breakdown by payment type
-  4. Join              — enrich trips with pickup borough/zone names
-  5. ETL Pipeline      — filter → join → aggregate by borough → rank by revenue
+  1. ETL Pipeline      — filter → join → aggregate by borough → rank by revenue
 
 Usage:
     uv run python -m engine_comparison.benchmarks.tabular
@@ -87,36 +83,8 @@ def bench_pandas(trips_glob: str, zones_path: str, n_runs: int) -> dict:
     results = {}
 
     trip_files = glob.glob(trips_glob)
-    # Read
-    results["Read Parquet"] = timeit(lambda: pd.read_parquet(trip_files), n_runs)
-
     df = pd.read_parquet(trip_files)
     zones = pd.read_csv(zones_path)
-
-    # Filter: long-distance, high-fare trips
-    results["Filter"] = timeit(
-        lambda: df[(df["trip_distance"] > 5.0) & (df["fare_amount"] > 30.0)],
-        n_runs,
-    )
-
-    # GroupBy + Agg: revenue by payment type
-    results["GroupBy + Agg"] = timeit(
-        lambda: df.groupby("payment_type").agg(
-            trip_count=("VendorID", "count"),
-            total_revenue=("total_amount", "sum"),
-            avg_fare=("fare_amount", "mean"),
-            avg_tip=("tip_amount", "mean"),
-        ),
-        n_runs,
-    )
-
-    # Join: enrich with pickup zone names
-    results["Join"] = timeit(
-        lambda: df.merge(
-            zones, left_on="PULocationID", right_on="LocationID", how="inner"
-        ),
-        n_runs,
-    )
 
     # ETL Pipeline: filter → join → groupby borough → sort
     def etl_pipeline_safe():
@@ -147,55 +115,16 @@ def bench_pandas(trips_glob: str, zones_path: str, n_runs: int) -> dict:
 def bench_polars(trips_glob: str, zones_path: str, n_runs: int) -> dict:
     results = {}
 
-    # Read
-    # Ignore schema metadata mismatch across different months' parquet files
-    # by using union_by_name=True or schema_overrides.
-    # The scan_parquet function doesn't easily natively ignore differences in
-    # temporal resolution like Parquet reading normally does in Pandas.
-    # But reading as a dataset in pyarrow and then converting to polars works smoothly.
-    # Or, faster: use union_by_name=True if it works, or just pyarrow.
-    # For now, let's cast explicitly by loading via PyArrow dataset (as datafusion does)
-    # OR overriding schema if we just use glob. But schema override might not work if physical type differs.
-
-    # Actually, simplest is to use PyArrow to handle the dataset reading and cast to polars
+    # Read properly
     import pyarrow.dataset as ds
 
     def read_pl():
         table = ds.dataset(glob.glob(trips_glob)).to_table()
         return pl.from_arrow(table)
 
-    results["Read Parquet"] = timeit(read_pl, n_runs)
-
     # Preload data for fair in-memory comparison
     df = read_pl()
     zones = pl.read_csv(zones_path)
-
-    # Filter (in-memory)
-    results["Filter"] = timeit(
-        lambda: df.filter(
-            (pl.col("trip_distance") > 5.0) & (pl.col("fare_amount") > 30.0)
-        ),
-        n_runs,
-    )
-
-    # GroupBy + Agg (in-memory)
-    results["GroupBy + Agg"] = timeit(
-        lambda: df.group_by("payment_type").agg(
-            pl.len().alias("trip_count"),
-            pl.col("total_amount").sum().alias("total_revenue"),
-            pl.col("fare_amount").mean().alias("avg_fare"),
-            pl.col("tip_amount").mean().alias("avg_tip"),
-        ),
-        n_runs,
-    )
-
-    # Join (in-memory)
-    results["Join"] = timeit(
-        lambda: df.join(
-            zones, left_on="PULocationID", right_on="LocationID", how="inner"
-        ),
-        n_runs,
-    )
 
     # ETL Pipeline (fully lazy — single optimized query plan)
     # Since scan_parquet fails on Schema mismatch, we will use LazyFrame from the arrow dataset
@@ -235,14 +164,6 @@ def bench_polars(trips_glob: str, zones_path: str, n_runs: int) -> dict:
 def bench_datafusion(trips_glob: str, zones_path: str, n_runs: int) -> dict:
     results = {}
 
-    # Read
-    def df_read():
-        ctx = SessionContext()
-        ctx.register_parquet("trips", trips_glob)
-        ctx.sql("SELECT * FROM trips").to_arrow_table()
-
-    results["Read Parquet"] = timeit(df_read, n_runs)
-
     # Preload data for fair in-memory comparison
     ctx = SessionContext()
 
@@ -253,40 +174,6 @@ def bench_datafusion(trips_glob: str, zones_path: str, n_runs: int) -> dict:
     zones_table = pcsv.read_csv(zones_path)
     ctx.register_record_batches("trips", [trips_table.to_batches()])
     ctx.register_record_batches("zones", [zones_table.to_batches()])
-
-    # Filter (in-memory)
-    def df_filter():
-        ctx.sql("""
-            SELECT *
-            FROM trips
-            WHERE trip_distance > 5.0 AND fare_amount > 30.0
-        """).to_arrow_table()
-
-    results["Filter"] = timeit(df_filter, n_runs)
-
-    # GroupBy + Agg (in-memory)
-    def df_groupby():
-        ctx.sql("""
-            SELECT payment_type,
-                   COUNT(*)            AS trip_count,
-                   SUM(total_amount)   AS total_revenue,
-                   AVG(fare_amount)    AS avg_fare,
-                   AVG(tip_amount)     AS avg_tip
-            FROM trips
-            GROUP BY payment_type
-        """).to_arrow_table()
-
-    results["GroupBy + Agg"] = timeit(df_groupby, n_runs)
-
-    # Join (in-memory)
-    def df_join():
-        ctx.sql("""
-            SELECT t.*, z."Borough", z."Zone"
-            FROM trips t
-            INNER JOIN zones z ON t."PULocationID" = z."LocationID"
-        """).to_arrow_table()
-
-    results["Join"] = timeit(df_join, n_runs)
 
     # ETL Pipeline (single SQL query — fully optimized)
     def df_etl():
@@ -319,45 +206,9 @@ def bench_datafusion(trips_glob: str, zones_path: str, n_runs: int) -> dict:
 def bench_daft(trips_glob: str, zones_path: str, n_runs: int) -> dict:
     results = {}
 
-    # Read
-    results["Read Parquet"] = timeit(
-        lambda: daft.read_parquet(trips_glob).collect(), n_runs
-    )
-
     # Preload data for fair in-memory comparison
     df = daft.read_parquet(trips_glob).collect()
     zones = daft.read_csv(zones_path).collect()
-
-    # Filter (in-memory)
-    results["Filter"] = timeit(
-        lambda: (
-            df.where(col("trip_distance") > 5.0)
-            .where(col("fare_amount") > 30.0)
-            .collect()
-        ),
-        n_runs,
-    )
-
-    # GroupBy + Agg (in-memory)
-    results["GroupBy + Agg"] = timeit(
-        lambda: (
-            df.groupby("payment_type")
-            .agg(
-                col("total_amount").sum().alias("total_revenue"),
-                col("fare_amount").mean().alias("avg_fare"),
-                col("tip_amount").mean().alias("avg_tip"),
-                col("VendorID").count().alias("trip_count"),
-            )
-            .collect()
-        ),
-        n_runs,
-    )
-
-    # Join (in-memory)
-    results["Join"] = timeit(
-        lambda: df.join(zones, left_on="PULocationID", right_on="LocationID").collect(),
-        n_runs,
-    )
 
     # ETL Pipeline
     results["ETL Pipeline"] = timeit(
@@ -389,7 +240,7 @@ def bench_daft(trips_glob: str, zones_path: str, n_runs: int) -> dict:
 # Results rendering
 # ---------------------------------------------------------------------------
 
-OPERATIONS = ["Read Parquet", "Filter", "GroupBy + Agg", "Join", "ETL Pipeline"]
+OPERATIONS = ["ETL Pipeline"]
 ENGINES = ["Pandas", "Polars", "DataFusion", "Daft"]
 ENGINE_COLORS = {
     "Pandas": "red",

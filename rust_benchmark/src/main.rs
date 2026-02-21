@@ -7,7 +7,7 @@ use chrono::Utc;
 use glob::glob;
 use image::imageops::FilterType;
 use polars::prelude::*;
-use polars::prelude::ParallelStrategy;
+
 use rayon::prelude::*;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -52,144 +52,6 @@ where
 
 fn bench_tabular(trips_path: &str, zones_path: &str, n_runs: usize) -> HashMap<String, f64> {
     let mut results = HashMap::new();
-
-    // Read Parquet
-    results.insert(
-        "Read Parquet".to_string(),
-        timeit(
-            || {
-                let mut dfs = Vec::new();
-                for entry in glob(trips_path).expect("Failed to read glob pattern") {
-                    if let Ok(path) = entry {
-                        let df = LazyFrame::scan_parquet(path.to_str().unwrap(), Default::default())
-                            .unwrap()
-                            .with_column(
-                                col("tpep_pickup_datetime").cast(DataType::Datetime(TimeUnit::Microseconds, None))
-                            )
-                            .with_column(
-                                col("tpep_dropoff_datetime").cast(DataType::Datetime(TimeUnit::Microseconds, None))
-                            );
-                        dfs.push(df);
-                    }
-                }
-                concat(dfs, UnionArgs::default()).unwrap().collect().unwrap()
-            },
-            n_runs,
-        ),
-    );
-
-    // Preload data for fair in-memory comparison
-    let _args = ScanArgsParquet {
-        n_rows: None,
-        cache: true,
-        parallel: ParallelStrategy::Auto,
-        rechunk: false,
-        row_index: None,
-        low_memory: false,
-        cloud_options: None,
-        use_statistics: true,
-        schema: None,
-        ..Default::default()
-    };
-    
-    // Actually, Polars 'scan_parquet' on a glob will fail identically to Python
-    // if there's a schema mismatch depending on how it resolves the schema. 
-    // We can just set ignore_errors to true, or we can use `polars` dataset reading 
-    // but the easiest fix for Polars-rs when hitting schema mismatch across files 
-    // is to map the schema or read files individually and `concat`.
-    // Given the difficulty, the easiest is to read each file, cast the problematic
-    // datetime column to `Datetime(TimeUnit::Microseconds, None)`, and then vertically concat them.
-    
-    let mut dfs = Vec::new();
-    for entry in glob(trips_path).expect("Failed to read glob pattern") {
-        match entry {
-            Ok(path) => {
-                let file_path = path.to_str().unwrap();
-                let df = LazyFrame::scan_parquet(file_path, Default::default())
-                    .unwrap()
-                    .with_column(
-                        col("tpep_pickup_datetime").cast(DataType::Datetime(TimeUnit::Microseconds, None))
-                    )
-                    .with_column(
-                        col("tpep_dropoff_datetime").cast(DataType::Datetime(TimeUnit::Microseconds, None))
-                    )
-                    .collect()
-                    .unwrap();
-                dfs.push(df.lazy());
-            }
-            Err(e) => println!("{:?}", e),
-        }
-    }
-    
-    let df = concat(dfs, UnionArgs::default()).unwrap().collect().unwrap();
-    let zones = LazyCsvReader::new(zones_path).finish().unwrap().collect().unwrap();
-
-    // Filter: long-distance, high-fare trips (in-memory)
-    let df_clone = df.clone();
-    results.insert(
-        "Filter".to_string(),
-        timeit(
-            || {
-                df_clone
-                    .clone()
-                    .lazy()
-                    .filter(
-                        col("trip_distance")
-                            .gt(lit(5.0))
-                            .and(col("fare_amount").gt(lit(30.0))),
-                    )
-                    .collect()
-                    .unwrap()
-            },
-            n_runs,
-        ),
-    );
-
-    // GroupBy + Agg: revenue by payment type (in-memory)
-    let df_clone = df.clone();
-    results.insert(
-        "GroupBy + Agg".to_string(),
-        timeit(
-            || {
-                df_clone
-                    .clone()
-                    .lazy()
-                    .group_by([col("payment_type")])
-                    .agg([
-                        col("VendorID").count().alias("trip_count"),
-                        col("total_amount").sum().alias("total_revenue"),
-                        col("fare_amount").mean().alias("avg_fare"),
-                        col("tip_amount").mean().alias("avg_tip"),
-                    ])
-                    .collect()
-                    .unwrap()
-            },
-            n_runs,
-        ),
-    );
-
-    // Join: enrich with pickup zone names (in-memory)
-    let df_clone = df.clone();
-    let zones_clone = zones.clone();
-    results.insert(
-        "Join".to_string(),
-        timeit(
-            || {
-                df_clone
-                    .clone()
-                    .lazy()
-                    .join(
-                        zones_clone.clone().lazy(),
-                        [col("PULocationID")],
-                        [col("LocationID")],
-                        JoinArgs::new(JoinType::Inner),
-                    )
-                    .collect()
-                    .unwrap()
-            },
-            n_runs,
-        ),
-    );
 
     // ETL Pipeline: filter → join → groupby → sort → limit (lazy from disk)
     // We already have `df` preloaded and concatenated which is easier for ETL since we had to cast 
@@ -266,26 +128,18 @@ fn bench_multimodal(images_dir: &str, n_images: usize) -> HashMap<String, f64> {
         return results;
     }
 
-    // Load Images (parallel) — measure just the load/decode time
+    // Total Pipeline = Load + Resize (consistent with Python methodology)
     let start = Instant::now();
     let images: Vec<_> = image_paths
         .par_iter()
         .filter_map(|p| image::open(p).ok())
         .collect();
-    let load_time = start.elapsed().as_secs_f64();
-    results.insert("Load Images".to_string(), load_time);
-
-    // Resize to 224×224 (parallel) — measure just the resize time on pre-loaded images
-    let start = Instant::now();
     let _resized: Vec<_> = images
         .into_par_iter()
         .map(|img| img.resize_exact(224, 224, FilterType::Lanczos3))
         .collect();
-    let resize_time = start.elapsed().as_secs_f64();
-    results.insert("Resize 224×224".to_string(), resize_time);
-
-    // Total Pipeline = Load + Resize (consistent with Python methodology)
-    results.insert("Total Pipeline".to_string(), load_time + resize_time);
+    let pipeline_time = start.elapsed().as_secs_f64();
+    results.insert("Total Pipeline".to_string(), pipeline_time);
 
     results
 }

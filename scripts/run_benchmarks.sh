@@ -35,12 +35,10 @@ echo "🦀 Building and running Rust benchmarks..."
 if [ -f "$HOME/.cargo/env" ]; then
     source "$HOME/.cargo/env"
 fi
-# Build in rust_benchmark dir, but run from project root so .data/ paths work
+# Run from rust_benchmark dir so relative ../.data paths work
 cd rust_benchmark
-cargo build --release
+cargo run --release
 cd ..
-# Run the binary from project root
-./rust_benchmark/target/release/rust_benchmark
 echo ""
 
 # ---------------------------------------------------------------------------

@@ -42,11 +42,7 @@ Combined results from Python engines and native Rust benchmarks on ~41M NYC taxi
 
 | Operation | Pandas | Polars | DataFusion | Daft | Polars-rs (Rust) |
 |---|---|---|---|---|---|
-| Read Parquet | 0.65s | 1.34s | 0.53s | 0.92s | **0.42s** |
-| Filter | 0.50s | 0.15s | 0.18s | 0.17s | **0.09s** |
-| GroupBy + Agg | 0.92s | **0.07s** | 0.08s | 0.08s | 0.19s |
-| Join | 2.08s | 1.94s | **1.21s** | 2.42s | 1.73s |
-| ETL Pipeline | 4.64s | 0.71s | **0.48s** | 1.10s | 0.57s |
+| ETL Pipeline | 3.17s | 0.78s | **0.49s** | 1.13s | 0.54s |
 
 ### Multimodal Benchmark (Python + Rust)
 
@@ -54,9 +50,7 @@ Combined results from Python engines and native Rust benchmarks on ~41M NYC taxi
 
 | Operation | Pandas + Pillow | Daft | Rust `image` | Speedup |
 |---|---|---|---|---|
-| Load Images | 0.40s | — | **0.07s** | 5.7× |
-| Resize 224×224 | 0.58s | — | **0.26s** | 2.2× |
-| Total Pipeline | 1.03s | **0.30s** | 0.33s | 3.1× |
+| Total Pipeline | 1.01s | 0.28s | **0.24s** | 4.2× |
 
 > Polars and DataFusion are excluded from multimodal because they lack native image operations — image work would still go through sequential Python.
 
@@ -182,11 +176,7 @@ exactly like production ML preprocessing pipelines encounter.
 
 | Operation | What it tests | Real-world analogy |
 |---|---|---|
-| Read Parquet | Full scan of ~660 MB file | Loading a dataset for analysis |
-| Filter | `distance > 5mi AND fare > $30` | Finding high-value trips |
-| GroupBy + Agg | Revenue by payment type | Payment analytics dashboard |
-| Join | Trip data ⟕ Zone lookup | Enriching with borough names |
-| ETL Pipeline | Filter → Join → Aggregate → Sort | Building a revenue report |
+| ETL Pipeline | Full filter → join → aggregate → sort | Building a revenue report from raw lake data |
 
 Engines: **Pandas** · **Polars** · **DataFusion** · **Daft** · **Polars-rs (Rust)**
 
@@ -194,9 +184,7 @@ Engines: **Pandas** · **Polars** · **DataFusion** · **Daft** · **Polars-rs (
 
 | Operation | What it tests | Real-world analogy |
 |---|---|---|
-| Load Images | Read + decode JPEGs | ML data pipeline ingestion |
-| Resize 224×224 | Resize to model input size | Preprocessing for ResNet/ViT |
-| Total Pipeline | Load → Decode → Resize | End-to-end ML preprocessing |
+| Total Pipeline | Load → Decode → Resize to 224×224 | End-to-end ML preprocessing |
 
 Engines: **Pandas + Pillow** (sequential) vs. **Daft** (parallel Rust) vs. **Rust `image`** (native)
 

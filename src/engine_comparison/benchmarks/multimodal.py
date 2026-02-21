@@ -79,37 +79,20 @@ def bench_pandas_pillow(image_dir: Path, n_images: int) -> dict:
     image_paths = sorted(image_dir.glob("*.jpg"))[:n_images]
     path_strings = [str(p) for p in image_paths]
 
-    # --- Load images ---
     gc.collect()
     t0 = time.perf_counter()
 
     df = pd.DataFrame({"path": path_strings})
     df["image"] = df["path"].apply(lambda p: Image.open(p).copy())
-
-    results["Load Images"] = time.perf_counter() - t0
-
-    # --- Resize to 224×224 ---
-    gc.collect()
-    t0 = time.perf_counter()
-
     df["resized"] = df["image"].apply(
         lambda img: img.resize(TARGET_IMAGE_SIZE, Image.LANCZOS)
     )
-
-    results["Resize 224×224"] = time.perf_counter() - t0
-
-    # --- Convert to NumPy tensors (model input prep) ---
-    gc.collect()
-    t0 = time.perf_counter()
-
     df["tensor"] = df["resized"].apply(
         lambda img: np.asarray(img, dtype=np.float32) / 255.0
     )
 
-    results["To Tensor"] = time.perf_counter() - t0
-
     # --- Total ---
-    results["Total Pipeline"] = sum(results.values())
+    results["Total Pipeline"] = time.perf_counter() - t0
 
     return results
 
@@ -166,7 +149,7 @@ def bench_daft_native(image_dir: Path, n_images: int) -> dict:
 # Results rendering
 # ---------------------------------------------------------------------------
 
-OPERATIONS = ["Load Images", "Resize 224×224", "Total Pipeline"]
+OPERATIONS = ["Total Pipeline"]
 
 
 def render_results(pandas_results: dict, daft_results: dict) -> None:
@@ -212,7 +195,7 @@ def save_chart(
     daft_results: dict,
     output_path: str = MULTIMODAL_CHART_OUTPUT,
 ) -> None:
-    operations = ["Load Images", "Resize 224×224", "Total Pipeline"]
+    operations = ["Total Pipeline"]
     p_times = [pandas_results.get(op, 0) for op in operations]
     d_times = [daft_results.get(op, 0) for op in operations]
 
