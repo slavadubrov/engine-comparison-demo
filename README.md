@@ -1,6 +1,6 @@
-# The Engine Wars — Live Demo
+# Engine Comparison Demo
 
-**Companion repository for ["The Engine Wars" article series](https://example.com/engine-wars).**
+**Companion repository for the published article: [Benchmarking Modern Data Processing Engines](https://slavadubrov.github.io/blog/2026/02/21/benchmarking-modern-data-processing-engines/).**
 
 This repository provides hands-on benchmarking and exploration of modern DataFrame engines — Pandas, Polars, DataFusion, Daft, and native Rust implementations. No synthetic data. No toy examples. Real NYC taxi trips and real food photos.
 
@@ -42,11 +42,11 @@ Combined results from Python engines and native Rust benchmarks on ~2.9M NYC tax
 
 | Operation | Pandas | Polars | DataFusion | Daft | Polars-rs (Rust) |
 |---|---|---|---|---|---|
-| Read Parquet | 0.06s | 0.05s | 0.08s | 0.08s | **0.04s** |
-| Filter | 0.02s | 0.03s | 0.08s | 0.10s | **0.05s** |
-| GroupBy + Agg | 0.08s | 0.02s | 0.03s | 0.03s | **0.02s** |
-| Join | 0.13s | 0.14s | 0.22s | 0.18s | **0.07s** |
-| ETL Pipeline | 0.20s | 0.05s | 0.04s | 0.08s | **0.04s** |
+| Read Parquet | 0.07s | 0.07s | 0.08s | 0.08s | **0.04s** |
+| Filter | 0.02s | 0.01s | 0.02s | 0.02s | **0.01s** |
+| GroupBy + Agg | 0.07s | 0.01s | 0.01s | 0.01s | **0.01s** |
+| Join | 0.16s | 0.10s | 0.04s | 0.10s | **0.03s** |
+| ETL Pipeline | 0.18s | 0.05s | 0.04s | 0.08s | **0.05s** |
 
 ### Multimodal Benchmark (Python + Rust)
 
@@ -54,9 +54,9 @@ Combined results from Python engines and native Rust benchmarks on ~2.9M NYC tax
 
 | Operation | Pandas + Pillow | Daft | Rust `image` | Speedup |
 |---|---|---|---|---|
-| Load Images | 0.40s | — | **0.06s** | 6.2× |
-| Resize 224×224 | 0.59s | — | **0.19s** | 3.0× |
-| Total Pipeline | 1.04s | 0.54s | **0.26s** | 4.0× |
+| Load Images | 0.40s | — | **0.06s** | 6.4× |
+| Resize 224×224 | 0.58s | — | **0.21s** | 2.8× |
+| Total Pipeline | 1.03s | 0.52s | **0.27s** | 3.8× |
 
 > Polars and DataFusion are excluded from multimodal because they lack native image operations — image work would still go through sequential Python.
 
