@@ -1,13 +1,13 @@
 {
   "benchmark": "tabular",
-  "timestamp": "2026-02-21T19:54:11.886111+00:00",
+  "timestamp": "2026-10-02T18:50:18.059648+00:00",
   "dataset": {
     "name": "NYC Yellow Taxi",
     "rows": 41169720
   },
   "results": {
     "Polars-rs": {
-      "ETL Pipeline": 0.540985
+      "ETL Pipeline": 0.690945583
     }
   }
 }

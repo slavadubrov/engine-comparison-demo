@@ -2,13 +2,15 @@
 """
 Engine Comparison — Single-Node Tabular Benchmark (NYC Taxi Data)
 ============================================================
-Downloads real NYC Yellow Taxi trip records (~2.9M rows) and benchmarks
-identical analytical queries across four engines:
+Downloads NYC Yellow Taxi trip records for one year (~41M rows for 2024) and
+times the same job on four engines:
 
   Pandas · Polars · Apache DataFusion · Daft
 
-Queries:
-  1. ETL Pipeline      — filter → join → aggregate by borough → rank by revenue
+Job ("ETL Pipeline"): read the Parquet files and the zone CSV, keep trips with
+fare_amount > 10, join zones, sum revenue by borough and zone, return the top
+20. Each engine reads its input inside the timed function. The script reports
+the median of --runs runs and checks that every engine returns the same rows.
 
 Usage:
     uv run python -m engine_comparison.benchmarks.tabular
@@ -32,9 +34,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import polars as pl
-import pyarrow.csv as pcsv
+import pyarrow as pa
 import pyarrow.dataset as ds
-import pyarrow.parquet as pq
 from daft import col
 from datafusion import SessionContext
 from rich.console import Console
@@ -62,77 +63,66 @@ matplotlib.use("Agg")
 # ---------------------------------------------------------------------------
 
 
-def timeit(fn, n_runs: int = DEFAULT_BENCHMARK_RUNS) -> float:
-    """Run fn() n_runs times, return median elapsed seconds."""
+def timeit(fn, n_runs: int = DEFAULT_BENCHMARK_RUNS) -> tuple[float, object]:
+    """Run fn() n_runs times. Return (median elapsed seconds, last result)."""
     times: list[float] = []
+    result = None
     for _ in range(n_runs):
         gc.collect()
         t0 = time.perf_counter()
-        fn()
-        elapsed = time.perf_counter() - t0
-        times.append(elapsed)
-    return sorted(times)[len(times) // 2]
+        result = fn()
+        times.append(time.perf_counter() - t0)
+    return sorted(times)[len(times) // 2], result
 
 
 # ---------------------------------------------------------------------------
-# Benchmarks: Pandas
+# The timed job
 # ---------------------------------------------------------------------------
+# Every engine runs the same job inside the timed function:
+#   read the 12 monthly Parquet files and the zone CSV from disk
+#   → keep trips with fare_amount > 10
+#   → inner join zones on PULocationID = LocationID
+#   → group by Borough, Zone: sum(total_amount), count, mean(tip_amount)
+#   → sort by revenue descending → top 20
+# Nothing is loaded before the timer starts. Each function returns the
+# result as an Arrow table so main() can check that all engines agree.
+
+TRIP_COLUMNS = ["PULocationID", "fare_amount", "total_amount", "tip_amount"]
+RESULT_COLUMNS = ["Borough", "Zone", "revenue", "trips", "avg_tip"]
 
 
-def bench_pandas(trips_glob: str, zones_path: str, n_runs: int) -> dict:
-    results = {}
+def bench_pandas(trips_glob: str, zones_path: str, n_runs: int):
+    trip_files = sorted(glob.glob(trips_glob))
 
-    trip_files = glob.glob(trips_glob)
-    df = pd.read_parquet(trip_files)
-    zones = pd.read_csv(zones_path)
-
-    # ETL Pipeline: filter → join → groupby borough → sort
-    def etl_pipeline_safe():
+    def job():
+        # Pandas has no query optimizer, so the script names the columns
+        # the query needs. The lazy engines find them on their own.
+        df = pd.read_parquet(trip_files, columns=TRIP_COLUMNS)
+        # keep_default_na=False keeps the literal "N/A" zone names, as the
+        # other engines do.
+        zones = pd.read_csv(zones_path, keep_default_na=False)
         merged = df[df["fare_amount"] > 10.0].merge(
             zones, left_on="PULocationID", right_on="LocationID", how="inner"
         )
-        result = (
-            merged.groupby(["Borough", "Zone"])
+        return (
+            merged.groupby(["Borough", "Zone"], as_index=False)
             .agg(
                 revenue=("total_amount", "sum"),
-                trips=("VendorID", "count"),
+                trips=("total_amount", "size"),
                 avg_tip=("tip_amount", "mean"),
             )
             .sort_values("revenue", ascending=False)
             .head(20)
         )
-        return result
 
-    results["ETL Pipeline"] = timeit(etl_pipeline_safe, n_runs)
-    return results
-
-
-# ---------------------------------------------------------------------------
-# Benchmarks: Polars
-# ---------------------------------------------------------------------------
+    t, result = timeit(job, n_runs)
+    return t, pa.Table.from_pandas(result[RESULT_COLUMNS], preserve_index=False)
 
 
-def bench_polars(trips_glob: str, zones_path: str, n_runs: int) -> dict:
-    results = {}
-
-    # Read properly
-    import pyarrow.dataset as ds
-
-    def read_pl():
-        table = ds.dataset(glob.glob(trips_glob)).to_table()
-        return pl.from_arrow(table)
-
-    # Preload data for fair in-memory comparison
-    df = read_pl()
-    zones = pl.read_csv(zones_path)
-
-    # ETL Pipeline (fully lazy — single optimized query plan)
-    # Since scan_parquet fails on Schema mismatch, we will use LazyFrame from the arrow dataset
-    # OR we can just use `pl.scan_pyarrow_dataset()` which handles this gracefully!
-
-    results["ETL Pipeline"] = timeit(
-        lambda: (
-            pl.scan_pyarrow_dataset(ds.dataset(glob.glob(trips_glob)))
+def bench_polars(trips_glob: str, zones_path: str, n_runs: int):
+    def job():
+        return (
+            pl.scan_parquet(trips_glob)
             .filter(pl.col("fare_amount") > 10.0)
             .join(
                 pl.scan_csv(zones_path),
@@ -149,38 +139,18 @@ def bench_polars(trips_glob: str, zones_path: str, n_runs: int) -> dict:
             .sort("revenue", descending=True)
             .head(20)
             .collect()
-        ),
-        n_runs,
-    )
+        )
 
-    return results
-
-
-# ---------------------------------------------------------------------------
-# Benchmarks: DataFusion
-# ---------------------------------------------------------------------------
+    t, result = timeit(job, n_runs)
+    return t, result.select(RESULT_COLUMNS).to_arrow()
 
 
-def bench_datafusion(trips_glob: str, zones_path: str, n_runs: int) -> dict:
-    results = {}
-
-    # Preload data for fair in-memory comparison
-    ctx = SessionContext()
-
-    # Use pyarrow dataset to load all parquet files matching glob into a single table
-    trip_dataset = ds.dataset(glob.glob(trips_glob))
-    trips_table = trip_dataset.to_table()
-
-    zones_table = pcsv.read_csv(zones_path)
-    ctx.register_record_batches("trips", [trips_table.to_batches()])
-    ctx.register_record_batches("zones", [zones_table.to_batches()])
-
-    # ETL Pipeline (single SQL query — fully optimized)
-    def df_etl():
+def bench_datafusion(trips_glob: str, zones_path: str, n_runs: int):
+    def job():
         ctx = SessionContext()
         ctx.register_parquet("trips", trips_glob)
         ctx.register_csv("zones", zones_path)
-        ctx.sql("""
+        return ctx.sql("""
             SELECT z."Borough",
                    z."Zone",
                    SUM(t.total_amount) AS revenue,
@@ -194,25 +164,12 @@ def bench_datafusion(trips_glob: str, zones_path: str, n_runs: int) -> dict:
             LIMIT 20
         """).to_arrow_table()
 
-    results["ETL Pipeline"] = timeit(df_etl, n_runs)
-    return results
+    return timeit(job, n_runs)
 
 
-# ---------------------------------------------------------------------------
-# Benchmarks: Daft
-# ---------------------------------------------------------------------------
-
-
-def bench_daft(trips_glob: str, zones_path: str, n_runs: int) -> dict:
-    results = {}
-
-    # Preload data for fair in-memory comparison
-    df = daft.read_parquet(trips_glob).collect()
-    zones = daft.read_csv(zones_path).collect()
-
-    # ETL Pipeline
-    results["ETL Pipeline"] = timeit(
-        lambda: (
+def bench_daft(trips_glob: str, zones_path: str, n_runs: int):
+    def job():
+        return (
             daft.read_parquet(trips_glob)
             .where(col("fare_amount") > 10.0)
             .join(
@@ -223,17 +180,40 @@ def bench_daft(trips_glob: str, zones_path: str, n_runs: int) -> dict:
             .groupby("Borough", "Zone")
             .agg(
                 col("total_amount").sum().alias("revenue"),
+                col("total_amount").count().alias("trips"),
                 col("tip_amount").mean().alias("avg_tip"),
-                col("VendorID").count().alias("trips"),
             )
             .sort("revenue", desc=True)
             .limit(20)
             .collect()
-        ),
-        n_runs,
-    )
+        )
 
-    return results
+    t, result = timeit(job, n_runs)
+    return t, result.select(*RESULT_COLUMNS).to_arrow()
+
+
+def result_key(table: pa.Table) -> list[tuple]:
+    """Rows as (Borough, Zone, trips, revenue rounded to cents), in order."""
+    d = table.to_pydict()
+    return [
+        (b, z, int(n), round(float(r), 2))
+        for b, z, n, r in zip(d["Borough"], d["Zone"], d["trips"], d["revenue"])
+    ]
+
+
+def check_results(results: dict[str, pa.Table]) -> None:
+    """Fail if any engine returned different rows from Pandas."""
+    expected = result_key(results["Pandas"])
+    for eng, table in results.items():
+        got = result_key(table)
+        if got != expected:
+            raise SystemExit(
+                f"{eng} returned a different result from Pandas:\n"
+                f"  Pandas: {expected[:3]} ...\n  {eng}: {got[:3]} ..."
+            )
+    console.print(
+        f"[bold green]✓ All engines returned the same {len(expected)} rows[/]\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -437,26 +417,22 @@ def main():
     )
 
     all_results: dict[str, dict] = {}
+    tables: dict[str, pa.Table] = {}
+    benches = [
+        ("Pandas", "red", bench_pandas),
+        ("Polars", "blue", bench_polars),
+        ("DataFusion", "magenta", bench_datafusion),
+        ("Daft", "green", bench_daft),
+    ]
+    for name, color, bench in benches:
+        console.print(f"[bold {color}]▸ Benchmarking {name}...[/]")
+        t, tables[name] = bench(trips_glob, zones_str, args.runs)
+        all_results[name] = {"ETL Pipeline": t}
+        console.print(f"  ✓ {name} done ({t:.3f}s)\n")
 
-    # --- Pandas ---
-    console.print("[bold red]▸ Benchmarking Pandas...[/]")
-    all_results["Pandas"] = bench_pandas(trips_glob, zones_str, args.runs)
-    console.print("  ✓ Pandas done\n")
-
-    # --- Polars ---
-    console.print("[bold blue]▸ Benchmarking Polars...[/]")
-    all_results["Polars"] = bench_polars(trips_glob, zones_str, args.runs)
-    console.print("  ✓ Polars done\n")
-
-    # --- DataFusion ---
-    console.print("[bold magenta]▸ Benchmarking DataFusion...[/]")
-    all_results["DataFusion"] = bench_datafusion(trips_glob, zones_str, args.runs)
-    console.print("  ✓ DataFusion done\n")
-
-    # --- Daft ---
-    console.print("[bold green]▸ Benchmarking Daft...[/]")
-    all_results["Daft"] = bench_daft(trips_glob, zones_str, args.runs)
-    console.print("  ✓ Daft done\n")
+    check_results(tables)
+    dataset_info["result_rows"] = tables["Pandas"].num_rows
+    dataset_info["runs"] = args.runs
 
     # --- Results ---
     render_table(all_results)

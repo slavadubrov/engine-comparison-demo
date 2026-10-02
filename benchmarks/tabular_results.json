@@ -1,25 +1,27 @@
 {
   "benchmark": "tabular",
-  "timestamp": "2026-02-21T19:54:06.019402+00:00",
+  "timestamp": "2026-10-02T18:50:07.504695+00:00",
   "dataset": {
     "name": "NYC Yellow Taxi",
     "year": 2024,
     "rows": 41169720,
     "columns": 19,
-    "size_mb": 660.9
+    "size_mb": 660.9,
+    "result_rows": 20,
+    "runs": 3
   },
   "results": {
     "Pandas": {
-      "ETL Pipeline": 3.168634916000883
+      "ETL Pipeline": 4.670106042001862
     },
     "Polars": {
-      "ETL Pipeline": 0.7808208750066115
+      "ETL Pipeline": 0.6250084999992396
     },
     "DataFusion": {
-      "ETL Pipeline": 0.4872181249957066
+      "ETL Pipeline": 0.40386633300659014
     },
     "Daft": {
-      "ETL Pipeline": 1.1294378330057953
+      "ETL Pipeline": 0.735106749998522
     }
   }
 }

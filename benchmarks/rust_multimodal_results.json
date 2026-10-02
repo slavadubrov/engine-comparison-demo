@@ -1,6 +1,6 @@
 {
   "benchmark": "multimodal",
-  "timestamp": "2026-02-21T19:54:12.123310+00:00",
+  "timestamp": "2026-10-02T18:50:18.338902+00:00",
   "dataset": {
     "images": 500,
     "name": "Food-101",
@@ -11,7 +11,7 @@
   },
   "results": {
     "Rust image": {
-      "Total Pipeline": 0.235865209
+      "Total Pipeline": 0.098385166
     }
   }
 }

@@ -112,7 +112,7 @@ def main():
 
     df = (
         daft.read_parquet(args.input)
-        .into_partitions(1)  # Limit concurrency to 2 workers for single GPU
+        .into_partitions(1)  # One partition: one GPU worker at a time
         .with_column("image_bytes", col("image_url").download())
         .with_column("embedding", embedder(col("image_bytes")))
         .exclude("image_bytes")

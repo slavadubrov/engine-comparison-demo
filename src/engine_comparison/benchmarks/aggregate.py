@@ -230,29 +230,6 @@ def save_multimodal_chart(results: dict[str, dict]) -> None:
         offset = (i - len(MULTIMODAL_ENGINES) / 2 + 0.5) * width
         ax.bar(x + offset, times, width, label=eng, color=color, edgecolor="white")
 
-    # Add speedup annotations
-    pandas_results = results.get("Pandas + Pillow", {})
-    for i, op in enumerate(MULTIMODAL_OPERATIONS):
-        pandas_t = pandas_results.get(op, 0)
-        if pandas_t > 0:
-            best_time = min(
-                results.get(eng, {}).get(op, float("inf"))
-                for eng in MULTIMODAL_ENGINES
-                if results.get(eng, {}).get(op)
-            )
-            if best_time < pandas_t:
-                speedup = pandas_t / best_time
-                ax.annotate(
-                    f"{speedup:.1f}×",
-                    xy=(i, pandas_t),
-                    xytext=(0, 14),
-                    textcoords="offset points",
-                    ha="center",
-                    fontsize=12,
-                    fontweight="bold",
-                    color="#2ecc71",
-                )
-
     ax.set_ylabel("Time (seconds, lower is better)", fontsize=12, fontweight="bold")
     ax.set_title(
         "Combined Multimodal Benchmark — Python vs Rust",

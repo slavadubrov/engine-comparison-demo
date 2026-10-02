@@ -5,13 +5,12 @@ Engine Comparison — Multimodal Image Benchmark (Food-101 Dataset)
 Downloads real food photos from ETH Zurich's Food-101 dataset, then
 benchmarks image preprocessing pipelines:
 
-  Pandas + Pillow  — sequential Python (GIL-bound, one image at a time)
-  Daft (Rust)      — parallel native image ops (bypasses GIL entirely)
+  Pandas + Pillow  — one image at a time through DataFrame.apply()
+  Daft (Rust)      — native image expressions that run in parallel
 
-This demonstrates the "Multimodal Shift" from the Engine Comparison article:
-traditional DataFrame engines treat images as opaque blobs and delegate
-to sequential Python. Daft runs decode/resize/encode in parallel Rust
-threads, achieving dramatic speedups on multicore hardware.
+Both engines read, decode, and resize the same images to 224×224 (bilinear)
+inside the timed function. The script reports the median of --runs runs and
+checks that each engine produced one 224×224 RGB image per input.
 
 Note: Polars and DataFusion are NOT included because they have no native
 image operations. Image work would still go through sequential Python
@@ -20,18 +19,15 @@ image operations. Image work would still go through sequential Python
 Usage:
     uv run python -m engine_comparison.benchmarks.multimodal
     uv run python -m engine_comparison.benchmarks.multimodal --images 1000
-    uv run python -m engine_comparison.benchmarks.multimodal --images 200
+    uv run python -m engine_comparison.benchmarks.multimodal --images 200 --runs 5
 """
 
 from __future__ import annotations
 
 import argparse
-import gc
 import json
 import os
-import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 import daft
 import matplotlib
@@ -46,11 +42,13 @@ from rich.table import Table
 
 from engine_comparison.constants import (
     BENCHMARKS_OUTPUT_DIR,
+    DEFAULT_BENCHMARK_RUNS,
     DEFAULT_N_IMAGES,
     MULTIMODAL_CHART_OUTPUT,
     MULTIMODAL_JSON_OUTPUT,
     TARGET_IMAGE_SIZE,
 )
+from engine_comparison.benchmarks.tabular import timeit
 from engine_comparison.data.loader import load_food101_images
 
 console = Console()
@@ -60,89 +58,57 @@ matplotlib.use("Agg")
 
 
 # ---------------------------------------------------------------------------
-# Benchmark: Pandas + Pillow (sequential Python)
+# The timed job
 # ---------------------------------------------------------------------------
+# Every engine gets the same list of image paths and does the same work inside
+# the timed function: read each JPEG from disk, decode it to RGB, and resize it
+# to 224×224 with a bilinear filter (Daft's resize filter). Each run must
+# produce one 224×224 RGB image per input path; a failed image stops the run.
 
 
-def bench_pandas_pillow(image_dir: Path, n_images: int) -> dict:
-    """
-    The traditional ML preprocessing approach:
-      1. Build a DataFrame of file paths
-      2. .apply(Image.open) — one image at a time, GIL-bound
-      3. .apply(img.resize) — still sequential
-      4. .apply(np.asarray)  — Python object overhead
+def bench_pandas_pillow(paths: list[str], n_runs: int) -> tuple[float, list]:
+    """Pandas + Pillow: .apply() processes one image at a time."""
 
-    Every step is single-threaded. On a 16-core machine, 15 cores sit idle.
-    """
-    results: dict[str, float] = {}
-
-    image_paths = sorted(image_dir.glob("*.jpg"))[:n_images]
-    path_strings = [str(p) for p in image_paths]
-
-    gc.collect()
-    t0 = time.perf_counter()
-
-    df = pd.DataFrame({"path": path_strings})
-    df["image"] = df["path"].apply(lambda p: Image.open(p).copy())
-    df["resized"] = df["image"].apply(
-        lambda img: img.resize(TARGET_IMAGE_SIZE, Image.LANCZOS)
-    )
-    df["tensor"] = df["resized"].apply(
-        lambda img: np.asarray(img, dtype=np.float32) / 255.0
-    )
-
-    # --- Total ---
-    results["Total Pipeline"] = time.perf_counter() - t0
-
-    return results
-
-
-# ---------------------------------------------------------------------------
-# Benchmark: Daft (native Rust image processing)
-# ---------------------------------------------------------------------------
-
-
-def bench_daft_native(image_dir: Path, n_images: int) -> dict:
-    """
-    Daft's multimodal-native approach:
-      1. from_glob_path("*.jpg")  — Rust file discovery
-      2. .download()              — parallel I/O in Rust threads
-      3. .decode_image()          — JPEG decode in Rust (parallel)
-      4. .resize(224, 224)        — resize in Rust (parallel)
-
-    All heavy work runs in the Rust engine, completely bypassing Python's
-    GIL. On a 16-core machine, all 16 cores participate.
-
-    NOTE: Daft uses lazy execution, so load/decode/resize happen together
-    in an optimized pipeline. We measure the end-to-end time only.
-    Individual operation times cannot be isolated.
-    """
-    results: dict[str, float] = {}
-    glob_pattern = str(image_dir / "*.jpg")
-
-    # --- Full pipeline: load → decode → resize (end-to-end) ---
-    # Daft's lazy execution fuses all operations together for optimal
-    # performance. We can only measure the total time, not individual steps.
-    gc.collect()
-    t0 = time.perf_counter()
-
-    df_full = (
-        daft.from_glob_path(glob_pattern)
-        .limit(n_images)
-        .with_column("image", col("path").download().decode_image())
-        .with_column(
-            "resized", col("image").resize(TARGET_IMAGE_SIZE[0], TARGET_IMAGE_SIZE[1])
+    def job():
+        df = pd.DataFrame({"path": paths})
+        df["image"] = df["path"].apply(lambda p: Image.open(p).convert("RGB"))
+        df["resized"] = df["image"].apply(
+            lambda img: img.resize(TARGET_IMAGE_SIZE, Image.BILINEAR)
         )
-    )
-    df_full.collect()
+        return df["resized"].tolist()
 
-    total_time = time.perf_counter() - t0
+    t, images = timeit(job, n_runs)
+    shapes = [img.size[::-1] + (len(img.getbands()),) for img in images]
+    return t, shapes
 
-    # We report Total Pipeline only. Individual operations are fused and
-    # cannot be separated in Daft's execution model.
-    results["Total Pipeline"] = total_time
 
-    return results
+def bench_daft_native(paths: list[str], n_runs: int) -> tuple[float, list]:
+    """Daft: read, decode, and resize with native expressions that run in
+    parallel Rust threads. Lazy execution fuses the steps, so only the total
+    is measured."""
+
+    def job():
+        return (
+            daft.from_pydict({"path": paths})
+            .with_column("image", col("path").download().decode_image(mode="RGB"))
+            .with_column(
+                "resized",
+                col("image").resize(TARGET_IMAGE_SIZE[0], TARGET_IMAGE_SIZE[1]),
+            )
+            .select("resized")
+            .collect()
+        )
+
+    t, df = timeit(job, n_runs)
+    shapes = [np.asarray(img).shape for img in df.to_pydict()["resized"]]
+    return t, shapes
+
+
+def check_outputs(engine: str, shapes: list, n: int) -> None:
+    w, h = TARGET_IMAGE_SIZE
+    if len(shapes) != n or any(tuple(s) != (h, w, 3) for s in shapes):
+        raise SystemExit(f"{engine} did not produce {n} {w}×{h} RGB images")
+    console.print(f"  ✓ {engine} produced {n} {w}×{h} RGB images")
 
 
 # ---------------------------------------------------------------------------
@@ -180,13 +146,9 @@ def render_results(pandas_results: dict, daft_results: dict) -> None:
 
     console.print(table)
 
-    # Print the key insight
     console.print(
-        "\n[bold yellow]Key Insight:[/] Polars and DataFusion are excluded "
-        "because they have no native image operations — image work would "
-        "still go through sequential Python, performing similarly to Pandas.\n"
-        "The bottleneck is [underline]not[/underline] the DataFrame layer; "
-        "it's the Python GIL.\n"
+        "\n[dim]Polars and DataFusion are not included: they have no native "
+        "image operations, so image work would run through Python UDFs.[/]\n"
     )
 
 
@@ -290,6 +252,12 @@ def main():
         default=DEFAULT_N_IMAGES,
         help=f"Number of Food-101 images to benchmark (default: {DEFAULT_N_IMAGES})",
     )
+    parser.add_argument(
+        "--runs",
+        type=int,
+        default=DEFAULT_BENCHMARK_RUNS,
+        help=f"Timing runs (default: {DEFAULT_BENCHMARK_RUNS}, median reported)",
+    )
     args = parser.parse_args()
 
     # Download / load images
@@ -309,6 +277,7 @@ def main():
         "images": n,
         "target_size": list(TARGET_IMAGE_SIZE),
         "cpu_cores": os.cpu_count(),
+        "runs": args.runs,
     }
 
     console.print(
@@ -325,15 +294,19 @@ def main():
         )
     )
 
+    paths = [str(p) for p in sorted(images_dir.glob("*.jpg"))[:n]]
+
     # --- Pandas + Pillow ---
     console.print("[bold red]▸ Benchmarking Pandas + Pillow (sequential)...[/]")
-    pandas_results = bench_pandas_pillow(images_dir, n)
-    console.print("  ✓ Pandas done\n")
+    t, shapes = bench_pandas_pillow(paths, args.runs)
+    check_outputs("Pandas + Pillow", shapes, n)
+    pandas_results = {"Total Pipeline": t}
 
     # --- Daft (Rust) ---
     console.print("[bold green]▸ Benchmarking Daft (Rust-native parallel)...[/]")
-    daft_results = bench_daft_native(images_dir, n)
-    console.print("  ✓ Daft done\n")
+    t, shapes = bench_daft_native(paths, args.runs)
+    check_outputs("Daft", shapes, n)
+    daft_results = {"Total Pipeline": t}
 
     # --- Results ---
     render_results(pandas_results, daft_results)

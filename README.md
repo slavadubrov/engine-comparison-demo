@@ -1,8 +1,8 @@
 # Engine Comparison Demo
 
-**Companion repository for the published article: [Benchmarking Modern Data Processing Engines](https://slavadubrov.github.io/blog/2026/02/21/benchmarking-modern-data-processing-engines/).**
+**Companion repository for the article [Data Processing Engines: Polars, DataFusion, Ray, and Spark](https://slavadubrov.github.io/blog/2026/02/21/modern-data-processing-engines/).**
 
-This repository provides hands-on benchmarking and exploration of modern DataFrame engines — Pandas, Polars, DataFusion, Daft, and native Rust implementations. No synthetic data. No toy examples. Real NYC taxi trips and real food photos.
+This repository provides hands-on benchmarking and exploration of modern DataFrame engines — Pandas, Polars, DataFusion, Daft, and native Rust implementations. Uses NYC taxi trips and Food-101 photos; the API notebook also generates a small synthetic events table.
 
 ---
 
@@ -34,7 +34,12 @@ You can also spin up distributed services via Docker Compose to test cluster-sca
 
 ## Benchmark Results
 
-Combined results from Python engines and native Rust benchmarks on ~41M NYC taxi trips and 500 food images.
+One run of `./scripts/run_benchmarks.sh` on an Apple M5 Max (18 cores, 64 GB RAM), October 2026. Each number is the median of three runs.
+
+### What each engine does inside the timer
+
+- **Tabular:** read the 12 monthly Parquet files (~41M trips) and the zone CSV from disk, keep trips with `fare_amount > 10`, join the zone table, sum revenue by borough and zone, and return the top 20. Pandas is given the four trip columns the query uses; the lazy engines find them on their own. The script checks that every Python engine returns the same 20 rows.
+- **Images:** read the same 500 JPEGs, decode them to RGB, and resize them to 224×224 with a bilinear filter. Each engine must produce 500 images; a failed image stops the run.
 
 ### Tabular Benchmark (Python + Rust)
 
@@ -42,17 +47,19 @@ Combined results from Python engines and native Rust benchmarks on ~41M NYC taxi
 
 | Operation | Pandas | Polars | DataFusion | Daft | Polars-rs (Rust) |
 |---|---|---|---|---|---|
-| ETL Pipeline | 3.17s | 0.78s | **0.49s** | 1.13s | 0.54s |
+| ETL Pipeline | 4.67s | 0.63s | **0.40s** | 0.74s | 0.69s |
 
 ### Multimodal Benchmark (Python + Rust)
 
 ![Combined Multimodal Benchmark — Python vs Rust](benchmarks/combined_multimodal.png)
 
-| Operation | Pandas + Pillow | Daft | Rust `image` | Speedup |
-|---|---|---|---|---|
-| Total Pipeline | 1.01s | 0.28s | **0.24s** | 4.2× |
+| Operation | Pandas + Pillow | Daft | Rust `image` |
+|---|---|---|---|
+| Total Pipeline | 0.55s | 0.34s | **0.10s** |
 
-> Polars and DataFusion are excluded from multimodal because they lack native image operations — image work would still go through sequential Python.
+The machine was running other work. Across four invocations of the Python benchmarks, Pandas ranged from 2.6 to 4.8 s on the tabular job and from 0.55 to 1.21 s on the images. DataFusion was the fastest Python engine on the tabular job in every invocation; Polars and Daft changed places. Run the scripts on your own hardware before drawing conclusions.
+
+> Polars and DataFusion are excluded from multimodal because they lack native image operations — image work would still go through Python UDFs.
 
 ---
 
@@ -132,8 +139,8 @@ uv run python -m engine_comparison.benchmarks.tabular --year 2023 --month 6
 # Tabular: more timing precision
 uv run python -m engine_comparison.benchmarks.tabular --runs 5
 
-# Multimodal: more images = larger speedup (more parallelism)
-uv run python -m engine_comparison.benchmarks.multimodal --images 1000
+# Multimodal: larger image set, more timing runs
+uv run python -m engine_comparison.benchmarks.multimodal --images 1000 --runs 5
 
 # Multimodal: quick smoke test
 uv run python -m engine_comparison.benchmarks.multimodal --images 100
@@ -184,9 +191,9 @@ Engines: **Pandas** · **Polars** · **DataFusion** · **Daft** · **Polars-rs (
 
 | Operation | What it tests | Real-world analogy |
 |---|---|---|
-| Total Pipeline | Load → Decode → Resize to 224×224 | End-to-end ML preprocessing |
+| Total Pipeline | Read → Decode to RGB → Resize to 224×224 (bilinear) | End-to-end ML preprocessing |
 
-Engines: **Pandas + Pillow** (sequential) vs. **Daft** (parallel Rust) vs. **Rust `image`** (native)
+Engines: **Pandas + Pillow** (one image at a time) · **Daft** (native image expressions) · **Rust `image` + rayon** (parallel)
 
 ---
 
@@ -364,12 +371,12 @@ implementations for cluster-scale processing:
 | Module | Engine | Workload |
 |---|---|---|
 | `ray_inference` | Ray Data | GPU batch image classification |
-| `daft_pipeline` | Daft Flotilla | Distributed document embedding |
-| `spark_etl` | PySpark | Petabyte-scale tabular ETL |
+| `daft_pipeline` | Daft | Image embedding with CLIP on the Ray runner |
+| `spark_etl` | PySpark | Tabular ETL (filter, join, aggregate) |
 
 Install extras: `uv sync --extra distributed`
 
-These require actual cluster infrastructure (Ray, Spark, or Daft Cloud).
+These need a Ray or Spark cluster; the Docker Compose stack above runs one locally.
 
 ---
 
