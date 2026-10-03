@@ -53,56 +53,56 @@ where
 fn bench_tabular(trips_path: &str, zones_path: &str, n_runs: usize) -> HashMap<String, f64> {
     let mut results = HashMap::new();
 
-    // ETL Pipeline: filter → join → groupby → sort → limit (lazy from disk)
-    // We already have `df` preloaded and concatenated which is easier for ETL since we had to cast 
-    // the datetimes. The original benchmark tested LazyFrame::scan_parquet here.
-    // We'll mimic this by using the lazy concat of the files.
-    results.insert(
-        "ETL Pipeline".to_string(),
-        timeit(
-            || {
-                let mut dfs = Vec::new();
-                for entry in glob(trips_path).expect("Failed to read glob pattern") {
-                    if let Ok(path) = entry {
-                        let df = LazyFrame::scan_parquet(path.to_str().unwrap(), Default::default())
-                            .unwrap()
-                            .with_column(
-                                col("tpep_pickup_datetime").cast(DataType::Datetime(TimeUnit::Microseconds, None))
-                            )
-                            .with_column(
-                                col("tpep_dropoff_datetime").cast(DataType::Datetime(TimeUnit::Microseconds, None))
-                            );
-                        dfs.push(df);
-                    }
-                }
-                
-                let trips = concat(dfs, UnionArgs::default()).unwrap();
-                let zones = LazyCsvReader::new(zones_path).finish().unwrap();
-                trips
-                    .filter(col("fare_amount").gt(lit(10.0)))
-                    .join(
-                        zones,
-                        [col("PULocationID")],
-                        [col("LocationID")],
-                        JoinArgs::new(JoinType::Inner),
-                    )
-                    .group_by([col("Borough"), col("Zone")])
-                    .agg([
-                        col("total_amount").sum().alias("revenue"),
-                        col("VendorID").count().alias("trips"),
-                        col("tip_amount").mean().alias("avg_tip"),
-                    ])
-                    .sort(
-                        ["revenue"],
-                        SortMultipleOptions::default().with_order_descending(true),
-                    )
-                    .limit(20)
-                    .collect()
+    // ETL Pipeline: the same job as the Python engines. Read the Parquet files
+    // and the zone CSV inside the timed function, filter, join, group, sort,
+    // and keep the top 20. The datetime casts align the monthly schemas so
+    // the files can be concatenated.
+    let job = || {
+        let mut dfs = Vec::new();
+        for entry in glob(trips_path).expect("Failed to read glob pattern") {
+            if let Ok(path) = entry {
+                let df = LazyFrame::scan_parquet(path.to_str().unwrap(), Default::default())
                     .unwrap()
-            },
-            n_runs,
-        ),
-    );
+                    .with_column(
+                        col("tpep_pickup_datetime")
+                            .cast(DataType::Datetime(TimeUnit::Microseconds, None)),
+                    )
+                    .with_column(
+                        col("tpep_dropoff_datetime")
+                            .cast(DataType::Datetime(TimeUnit::Microseconds, None)),
+                    );
+                dfs.push(df);
+            }
+        }
+
+        let trips = concat(dfs, UnionArgs::default()).unwrap();
+        let zones = LazyCsvReader::new(zones_path).finish().unwrap();
+        trips
+            .filter(col("fare_amount").gt(lit(10.0)))
+            .join(
+                zones,
+                [col("PULocationID")],
+                [col("LocationID")],
+                JoinArgs::new(JoinType::Inner),
+            )
+            .group_by([col("Borough"), col("Zone")])
+            .agg([
+                col("total_amount").sum().alias("revenue"),
+                col("VendorID").count().alias("trips"),
+                col("tip_amount").mean().alias("avg_tip"),
+            ])
+            .sort(
+                ["revenue"],
+                SortMultipleOptions::default().with_order_descending(true),
+            )
+            .limit(20)
+            .collect()
+            .unwrap()
+    };
+    results.insert("ETL Pipeline".to_string(), timeit(&job, n_runs));
+
+    // Print the result so it can be compared with the Python engines' rows.
+    println!("{}", job().head(Some(3)));
 
     results
 }
@@ -111,7 +111,7 @@ fn bench_tabular(trips_path: &str, zones_path: &str, n_runs: usize) -> HashMap<S
 // Multimodal Benchmarks (image crate + rayon)
 // ---------------------------------------------------------------------------
 
-fn bench_multimodal(images_dir: &str, n_images: usize) -> HashMap<String, f64> {
+fn bench_multimodal(images_dir: &str, n_images: usize, n_runs: usize) -> HashMap<String, f64> {
     let mut results = HashMap::new();
 
     // Collect image paths
@@ -128,17 +128,25 @@ fn bench_multimodal(images_dir: &str, n_images: usize) -> HashMap<String, f64> {
         return results;
     }
 
-    // Total Pipeline = Load + Resize (consistent with Python methodology)
-    let start = Instant::now();
-    let images: Vec<_> = image_paths
-        .par_iter()
-        .filter_map(|p| image::open(p).ok())
-        .collect();
-    let _resized: Vec<_> = images
-        .into_par_iter()
-        .map(|img| img.resize_exact(224, 224, FilterType::Lanczos3))
-        .collect();
-    let pipeline_time = start.elapsed().as_secs_f64();
+    // Same job as the Python engines: read each JPEG, decode to RGB, resize
+    // to 224x224 with a bilinear (Triangle) filter. A failed image stops the
+    // run, so every engine processes the same images.
+    let pipeline_time = timeit(
+        || {
+            let resized: Vec<_> = image_paths
+                .par_iter()
+                .map(|p| {
+                    let img = image::open(p)
+                        .unwrap_or_else(|e| panic!("failed to open {}: {}", p.display(), e))
+                        .to_rgb8();
+                    image::imageops::resize(&img, 224, 224, FilterType::Triangle)
+                })
+                .collect();
+            assert_eq!(resized.len(), n, "expected one output image per input");
+            resized
+        },
+        n_runs,
+    );
     results.insert("Total Pipeline".to_string(), pipeline_time);
 
     results
@@ -224,7 +232,7 @@ fn main() {
         println!("\n🦀 Running Rust image benchmark...");
 
         let n_images = 500;
-        let multimodal_results = bench_multimodal(&images_dir, n_images);
+        let multimodal_results = bench_multimodal(&images_dir, n_images, n_runs);
 
         // Print results
         println!("\n  Rust image Results:");

@@ -2,7 +2,7 @@
 """
 Engine Comparison — PySpark: Distributed Tabular ETL on NYC Taxi Data
 ================================================================
-Spark's strength: petabyte-scale joins with fault tolerance and AQE.
+Spark's strength: large distributed joins with fault tolerance and AQE.
 
 This runs the same NYC Taxi ETL pipeline from bench_tabular.py, but
 distributed across a Spark cluster for data-lake-scale volumes.

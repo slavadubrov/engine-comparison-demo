@@ -8,7 +8,7 @@ The demo compares three distributed data processing engines:
 
 | Engine | Workload | Strength |
 |--------|----------|----------|
-| **Apache Spark** | Tabular ETL | Petabyte-scale SQL and DataFrame operations |
+| **Apache Spark** | Tabular ETL | Distributed SQL and DataFrame operations |
 | **Ray Data** | GPU Inference | Streaming batch inference with actor pools |
 | **Daft** | Multimodal | Native GPU UDFs + Rust I/O for images/documents |
 
@@ -41,7 +41,7 @@ MinIO provides S3-compatible object storage, acting as the central data lake.
 Classic master-worker architecture for distributed tabular processing.
 
 - **spark-master**: Coordinates job scheduling, exposes Web UI on `:8080`
-- **spark-worker** (x2): Execute tasks, GPU-enabled for ML workloads
+- **spark-worker**: Executes tasks, GPU-enabled for ML workloads. `docker-compose.yml` sets replicas to 0; start one with `--scale spark-worker=1`.
 
 Spark excels at SQL-like operations: filtering, joins, aggregations over massive datasets.
 
@@ -170,28 +170,36 @@ Key features:
 
 - Docker 20.10+ with Compose v2
 - NVIDIA Docker runtime (for GPU support)
-- ~16 GB RAM recommended
+- ~32 GB RAM recommended (24 GB for Ray + 8 GB for the app container)
 
 ### Quick Start
+
+Start only the services one pipeline needs. Running `docker compose up -d` without service names starts every container, and the GPU containers then compete for one GPU's memory.
 
 ```bash
 # 1. Build images
 docker compose build
-
-# 2. Start the stack
-docker compose up -d
-
-# 3. Wait for services (~30s)
-docker compose ps
-
-# 4. Upload data
-./scripts/upload-data.sh
-
-# 5. Run pipelines
-./scripts/docker-run-spark.sh
-./scripts/docker-run-ray.sh --gpu-workers 1
-./scripts/docker-run-daft.sh
 ```
+
+**Daft or Ray:**
+
+```bash
+docker compose up -d minio minio-setup ray-head app
+./scripts/upload-data.sh
+./scripts/docker-run-daft.sh --input s3://bucket/image_metadata.parquet --output s3://bucket/embeddings/
+./scripts/docker-run-ray.sh --input s3://bucket/images/ --output s3://bucket/predictions/
+```
+
+**Spark:**
+
+```bash
+docker compose up -d minio minio-setup spark-master
+docker compose up -d --scale spark-worker=1 spark-worker app
+./scripts/upload-data.sh
+./scripts/docker-run-spark.sh --orders "s3a://lake/taxi/*.parquet" --output s3a://warehouse/report
+```
+
+Stop one stack (`docker compose stop ray-head` or `docker compose stop spark-worker`) before you start the other.
 
 ### Web UIs
 
@@ -251,6 +259,6 @@ docker compose exec app nvidia-smi
 # Interactive shell in app container
 docker compose exec app bash
 
-# Reset everything
-docker compose down -v && docker compose up -d
+# Reset everything, then start only the services you need (see Quick Start)
+docker compose down -v
 ```
